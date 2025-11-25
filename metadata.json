@@ -1,0 +1,5 @@
+{
+  "name": "Kichban AI",
+  "description": "An AI-powered script writing assistant allowing users to generate video scripts based on various templates, tones, and durations.",
+  "requestFramePermissions": []
+}
