@@ -85,21 +85,34 @@ export const TEMPLATES: ScriptTemplate[] = [
     id: 'senior-love',
     icon: '👵',
     title: 'Câu chuyện Senior Love',
-    description: 'Tự sự, hồi xuân, kịch tính & nồng nàn',
+    description: 'Tự sự, Hồi xuân, Cấm kỵ & Nồng nàn',
     systemPromptAddon: `
-      TASK: Write a romantic, dramatic narrative focused on elderly love.
-      RETENTION RULE: Every 30-40 seconds, introduce a 'Mini Hook' or emotional spike in the narration.
-      STRUCTURE:
-      1. OPENING HOOK: A shocking revelation or deep emotional question.
-      2. CONTEXT: Describe the setting through feeling and memory (not visual instructions).
-      3. BODY: Develop the romance/conflict through dialogue and internal monologue.
-      4. CLIMAX: A realization or dramatic turn.
-      5. CONCLUSION: A haunting, inviting closing statement.
+      TASK: Write a intense, confessional-style narrative about "Senior Love" (Late-life romance/Forbidden attraction).
+      
+      *** THE "FORBIDDEN & REJUVENATION" FORMULA ***
+      
+      1. THE "TABOO" CONTEXT (Setup):
+         - Characters often have a relationship gap (In-laws, old neighbors, lonely widowers).
+         - Establish "The Void": Loneliness, sexless marriage, or physical dissatisfaction with current partner vs. the Senior's surprising vitality.
+      
+      2. THE "SENSORY" HOOK (No Explicit Terms):
+         - Focus on ACCIDENTAL INTIMACY: A touch while cleaning, seeing a silhouette, rain/storm isolation, a massage.
+         - Describe the *Shock*: "I couldn't believe someone 70 years old could be this... [strong/firm/capable]."
+         - USE SUGGESTIVE LANGUAGE: "Nóng rực" (Burning), "Run rẩy" (Trembling), "Căng cứng" (Tense), "Bản năng" (Instinct), "Kích thước" (Size - implied).
+         - AVOID: Explicit anatomical terms. Use euphemisms ("Cái đó", "Sự nam tính", "Nơi ấy").
 
-      *** EMOTIONAL PULSE CHECK (CTAs) ***
-      - Connect with the viewer's loneliness or nostalgia.
-      - Example: "Have you ever felt invisible like this? Type 'Me too' in the comments. I want to read your story."
-      - Ensure the transition back to the story is smooth: "...Type 'Me too'. Because what happened next changed everything."
+      3. THE CONFLICT (Internal Monologue):
+         - Guilt vs. Desire. "I knew it was wrong, but my body was honest."
+         - The Comparison: Explicitly compare the Senior favorably against younger partners ("Better than my husband", "More energy than a 30-year-old").
+
+      4. THE CLIMAX (The Line is Crossed):
+         - A moment of surrender. "Whatever happens, happens."
+         - Focus on emotional fulfillment mixed with physical intensity.
+
+      *** RETENTION STRATEGY (CTAs) ***
+      - Insert "Confessional Questions" to hook the audience.
+      - Example: "Have you ever felt a desire you couldn't control? Type '1' if you understand this feeling."
+      - Example: "Do you think I made a mistake? Type 'Yes' or 'No'. I really need your opinion."
     `
   },
   {
