@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle } from 'lucide-react';
+import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle, CalendarDays } from 'lucide-react';
 import { 
   getAccounts, 
   createAccountByAdmin, 
@@ -25,6 +25,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [newDays, setNewDays] = useState<string>('30'); 
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
+
+  // State for custom extension days per account row
+  const [extendDaysMap, setExtendDaysMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -62,14 +65,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   };
 
   const handleExtend = (id: string, currentActive: boolean) => {
+    // Get custom days from state, default to 30 if not set or 0
+    const daysToExtend = extendDaysMap[id] || 30;
+
+    if (daysToExtend <= 0) {
+        alert("Số ngày gia hạn phải lớn hơn 0");
+        return;
+    }
+
     // If account is inactive, this action implies approval/activation + extension
     const message = currentActive 
-        ? "Gia hạn thêm 30 ngày cho tài khoản này?"
-        : "KÍCH HOẠT và Gia hạn 30 ngày cho tài khoản này?";
+        ? `Gia hạn thêm ${daysToExtend} ngày cho tài khoản này?`
+        : `KÍCH HOẠT và Gia hạn ${daysToExtend} ngày cho tài khoản này?`;
 
     if (confirm(message)) {
-      extendAccount(id, 30); // accountService.extendAccount also sets isActive = true
+      extendAccount(id, daysToExtend); // accountService.extendAccount also sets isActive = true
       loadAccounts();
+      
+      // Optional: Reset input back to undefined (shows placeholder 30) or keep it
+      // setExtendDaysMap(prev => ({...prev, [id]: 0})); 
     }
   };
 
@@ -85,7 +99,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="bg-white rounded-2xl w-full max-w-6xl h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         
         {/* Header */}
         <div className="bg-slate-900 p-5 flex justify-between items-center shrink-0">
@@ -106,7 +120,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
         <div className="flex-1 flex overflow-hidden">
           
           {/* LEFT: Create Account Form */}
-          <div className="w-1/3 bg-slate-50 border-r border-slate-200 p-6 overflow-y-auto hidden md:block">
+          <div className="w-1/3 max-w-sm bg-slate-50 border-r border-slate-200 p-6 overflow-y-auto hidden lg:block">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-primary-600" /> Cấp tài khoản thủ công
             </h3>
@@ -186,7 +200,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead>
                   <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
                     <th className="p-4 font-semibold">Tài khoản</th>
@@ -225,17 +239,35 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                           : <span className="text-slate-400 italic">Chưa thiết lập</span>
                         }
                       </td>
-                      <td className="p-4 text-right flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <td className="p-4 text-right flex justify-end items-center gap-3">
+                         {/* Extension Controls */}
+                         <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 border border-slate-200">
+                            <div className="relative">
+                                <input 
+                                    type="number" 
+                                    min="1"
+                                    className="w-12 bg-transparent text-center font-bold text-xs outline-none text-slate-700 placeholder:text-slate-400"
+                                    placeholder="30"
+                                    value={extendDaysMap[acc.id] || ''}
+                                    onChange={(e) => {
+                                        const val = parseInt(e.target.value);
+                                        setExtendDaysMap(prev => ({...prev, [acc.id]: isNaN(val) ? 0 : val}));
+                                    }}
+                                />
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium border-l border-slate-300 pl-1 pr-1">ngày</span>
+                         </div>
+
                          <button 
                             onClick={() => handleExtend(acc.id, acc.isActive)}
-                            title={acc.isActive ? "Gia hạn thêm 30 ngày" : "Kích hoạt + Gia hạn 30 ngày"}
+                            title={acc.isActive ? `Gia hạn thêm ${extendDaysMap[acc.id] || 30} ngày` : `Kích hoạt + Gia hạn ${extendDaysMap[acc.id] || 30} ngày`}
                             className={`p-2 rounded-lg border flex items-center gap-1 transition-colors ${!acc.isActive ? 'bg-green-600 text-white hover:bg-green-700 border-green-600 shadow-md' : 'bg-green-50 text-green-600 hover:bg-green-100 border-green-200'}`}
                          >
-                            {!acc.isActive ? <CheckCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                            {!acc.isActive && <span className="text-xs font-bold pr-1">Duyệt</span>}
+                            {!acc.isActive ? <CheckCircle className="w-4 h-4" /> : <CalendarDays className="w-4 h-4" />}
+                            <span className="text-xs font-bold hidden xl:inline">{!acc.isActive ? 'Duyệt' : 'Gia hạn'}</span>
                          </button>
                          
-                         {/* Prevent locking the default admin */}
+                         {/* Lock/Unlock Control */}
                          {acc.username !== 'admin' && (
                            <button 
                               onClick={() => handleToggleActive(acc.id, acc.isActive)}
