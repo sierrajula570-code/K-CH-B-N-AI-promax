@@ -1,13 +1,16 @@
+
 import React from 'react';
-import { History, Zap, Settings } from 'lucide-react';
+import { History, Zap, Settings, ShieldCheck } from 'lucide-react';
 
 interface Props {
   onOpenSettings: () => void;
   onOpenHistory: () => void;
   activeTab: 'new' | 'history';
+  isAdmin: boolean;
+  onOpenAdminPanel: () => void;
 }
 
-const Header: React.FC<Props> = ({ onOpenSettings, onOpenHistory, activeTab }) => {
+const Header: React.FC<Props> = ({ onOpenSettings, onOpenHistory, activeTab, isAdmin, onOpenAdminPanel }) => {
   return (
     <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-secondary-600 text-white shadow-lg sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -34,6 +37,18 @@ const Header: React.FC<Props> = ({ onOpenSettings, onOpenHistory, activeTab }) =
               <History className="w-4 h-4" />
               <span className="hidden sm:inline">Lịch sử</span>
             </button>
+
+            {/* Admin button - Conditionally rendered */}
+            {isAdmin && (
+              <button
+                onClick={onOpenAdminPanel}
+                className="flex items-center gap-2 bg-slate-900/30 hover:bg-slate-900/50 text-white px-4 py-2 rounded-full text-sm font-bold border border-white/10 transition-all shadow-lg hover:shadow-xl ring-1 ring-white/10"
+              >
+                <ShieldCheck className="w-4 h-4 text-violet-300" />
+                <span className="hidden sm:inline">Quản trị viên</span>
+              </button>
+            )}
+            
             <button 
               onClick={onOpenSettings}
               className="flex items-center gap-2 bg-white/10 hover:bg-white/20 active:bg-white/30 transition-all px-4 py-2 rounded-full text-sm font-bold backdrop-blur-md border border-white/20 hover:shadow-sm"
