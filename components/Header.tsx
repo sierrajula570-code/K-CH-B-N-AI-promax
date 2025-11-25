@@ -1,36 +1,18 @@
 import React from 'react';
-import { History, Zap, Settings, ShieldCheck } from 'lucide-react';
+import { History, Zap, Settings } from 'lucide-react';
 
 interface Props {
   onOpenSettings: () => void;
   onOpenHistory: () => void;
   activeTab: 'new' | 'history';
-  onOpenAdminAuth: () => void;
-  onOpenAdminPanel: () => void;
-  isAdmin: boolean;
 }
 
-const Header: React.FC<Props> = ({ 
-  onOpenSettings, 
-  onOpenHistory, 
-  activeTab, 
-  onOpenAdminAuth, 
-  onOpenAdminPanel,
-  isAdmin 
-}) => {
+const Header: React.FC<Props> = ({ onOpenSettings, onOpenHistory, activeTab }) => {
   return (
     <div className="bg-gradient-to-r from-primary-700 via-primary-600 to-secondary-600 text-white shadow-lg sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-4">
-          <div 
-            className="flex items-center gap-3 group cursor-pointer select-none"
-            onClick={(e) => {
-                // Secret trigger: 5 rapid clicks on logo to open Admin Auth if not already admin
-                if (e.detail === 5 && !isAdmin) {
-                    onOpenAdminAuth();
-                }
-            }}
-          >
+          <div className="flex items-center gap-3 group cursor-pointer">
             <div className="bg-white/20 p-2.5 rounded-2xl backdrop-blur-sm group-hover:bg-white/30 transition-all duration-300 shadow-inner border border-white/10">
                <Zap className="w-6 h-6 text-yellow-300 fill-current transform group-hover:scale-110 transition-transform" />
             </div>
@@ -40,18 +22,7 @@ const Header: React.FC<Props> = ({
             </div>
           </div>
           
-          <div className="flex gap-2 md:gap-3">
-            {/* Admin Button - Only visible to Authenticated Admin */}
-            {isAdmin && (
-              <button 
-                onClick={onOpenAdminPanel}
-                className="flex items-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 border border-emerald-400/30 px-3 py-2 rounded-full text-xs font-bold transition-all animate-in fade-in"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Admin</span>
-              </button>
-            )}
-
+          <div className="flex gap-3">
             <button 
               onClick={onOpenHistory}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all border ${
