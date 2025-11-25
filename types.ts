@@ -18,6 +18,12 @@ export interface DurationOption {
   promptDescription: string;
 }
 
+export interface PerspectiveOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
 export interface GeneratedScriptResponse {
   title: string;
   content: string;

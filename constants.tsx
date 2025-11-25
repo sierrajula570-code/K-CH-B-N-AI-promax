@@ -1,4 +1,4 @@
-import { ScriptTemplate, LanguageOption, DurationOption } from './types';
+import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption } from './types';
 
 export const TEMPLATES: ScriptTemplate[] = [
   {
@@ -329,4 +329,11 @@ export const DURATIONS: DurationOption[] = [
   { id: 'long', label: 'Dài (~10 phút)', promptDescription: 'Long duration, approximately 10 minutes spoken (~1300-1500 words).' },
   { id: 'very-long', label: 'Rất dài (~20 phút)', promptDescription: 'Very long duration, deep dive, approximately 20 minutes.' },
   { id: 'custom', label: 'Tùy chỉnh...', promptDescription: 'Custom duration as appropriate for the content depth.' },
+];
+
+export const PERSPECTIVES: PerspectiveOption[] = [
+  { id: 'auto', label: '✨ Tự động', description: 'AI tự chọn ngôi kể phù hợp nhất' },
+  { id: 'first', label: '👤 Ngôi thứ nhất (Tôi)', description: 'Kể chuyện, tâm sự, vlog cá nhân' },
+  { id: 'second', label: '👉 Ngôi thứ hai (Bạn)', description: 'Hướng dẫn, khuyên nhủ, tương tác' },
+  { id: 'third', label: '👀 Ngôi thứ ba', description: 'Kể lại sự kiện, tin tức, phim ảnh' },
 ];

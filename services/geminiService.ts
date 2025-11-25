@@ -1,5 +1,5 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { ScriptTemplate, LanguageOption, DurationOption, InputMode } from '../types';
+import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
 const getAiClient = () => {
   let apiKey = '';
@@ -112,6 +112,7 @@ export const generateScript = async (
   language: LanguageOption,
   duration: DurationOption,
   mode: InputMode,
+  perspective: PerspectiveOption,
   customMinutes?: number
 ): Promise<string> => {
   
@@ -152,6 +153,11 @@ export const generateScript = async (
     ROLE: Expert YouTube Scriptwriter & Voice Director.
     TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.
     
+    *** NARRATIVE PERSPECTIVE ***
+    - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
+    - CONTEXT: ${perspective.description}
+    - INSTRUCTION: Maintain this perspective consistently throughout the entire script.
+
     === STRICT TTS FORMATTING ENGINE (NO COMPROMISE) ===
     1. PARAGRAPH STRUCTURE:
        - Break text into short paragraphs of 3-5 sentences maximum.

@@ -36,8 +36,8 @@ const TemplateSelector: React.FC<Props> = ({ selectedTemplateId, onSelect }) => 
               <div className={`
                 text-2xl w-9 h-9 flex items-center justify-center rounded-xl shadow-sm transition-colors shrink-0 border border-slate-100
                 ${selectedTemplateId === template.id 
-                  ? 'bg-white' 
-                  : 'bg-slate-50 group-hover:bg-primary-50'}
+                  ? 'bg-white text-primary-600' 
+                  : 'bg-slate-50 group-hover:bg-primary-50 group-hover:text-primary-600'}
               `}>
                 <IconWrapper icon={template.icon} />
               </div>

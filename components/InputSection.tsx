@@ -12,12 +12,12 @@ interface Props {
 const InputSection: React.FC<Props> = ({ value, onChange, mode, setMode }) => {
   return (
     <div className="relative z-10">
-      {/* Background glow effect */}
+      {/* Background glow effect for prominence */}
       <div className="absolute -inset-0.5 bg-gradient-to-r from-primary-300 to-secondary-300 rounded-[20px] blur opacity-30 animate-pulse-slow pointer-events-none"></div>
       
       <div className="relative bg-white rounded-2xl shadow-card border-0 overflow-hidden group transition-all duration-300">
         {/* Header / Tabs */}
-        <div className="bg-slate-50/50 border-b border-slate-100 p-2 flex gap-2">
+        <div className="bg-slate-50/80 border-b border-slate-100 p-2 flex gap-2 backdrop-blur-sm">
           {[
             { id: InputMode.IDEA, label: 'Ý tưởng mới', icon: Lightbulb, activeClass: 'bg-gradient-to-r from-yellow-50 to-orange-50 text-yellow-700 ring-1 ring-yellow-200 shadow-sm', iconColor: 'text-yellow-500' },
             { id: InputMode.TEXT, label: 'Viết lại văn bản', icon: FileText, activeClass: 'bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 ring-1 ring-blue-200 shadow-sm', iconColor: 'text-blue-500' },
@@ -30,7 +30,7 @@ const InputSection: React.FC<Props> = ({ value, onChange, mode, setMode }) => {
                 flex-1 flex items-center justify-center gap-2.5 px-4 py-3.5 text-sm font-bold rounded-xl transition-all duration-300
                 ${mode === tab.id
                   ? tab.activeClass
-                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
                 }
               `}
             >

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { TEMPLATES, LANGUAGES, DURATIONS } from './constants';
-import { ScriptTemplate, LanguageOption, DurationOption, InputMode, HistoryItem } from './types';
+import { TEMPLATES, LANGUAGES, DURATIONS, PERSPECTIVES } from './constants';
+import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem } from './types';
 import Header from './components/Header';
 import InputSection from './components/InputSection';
 import TemplateSelector from './components/TemplateSelector';
@@ -19,6 +19,7 @@ function App() {
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageOption>(LANGUAGES[0]);
   const [selectedDuration, setSelectedDuration] = useState<DurationOption>(DURATIONS[0]);
   const [customMinutes, setCustomMinutes] = useState<number>(5);
+  const [selectedPerspective, setSelectedPerspective] = useState<PerspectiveOption>(PERSPECTIVES[0]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [generatedContent, setGeneratedContent] = useState<string | null>(null);
@@ -92,6 +93,7 @@ function App() {
         selectedLanguage,
         selectedDuration,
         inputMode,
+        selectedPerspective,
         customMinutes
       );
       setGeneratedContent(result);
@@ -147,6 +149,8 @@ function App() {
             onSelectDuration={setSelectedDuration}
             customMinutes={customMinutes}
             setCustomMinutes={setCustomMinutes}
+            selectedPerspective={selectedPerspective.id}
+            onSelectPerspective={setSelectedPerspective}
           />
         </section>
 
