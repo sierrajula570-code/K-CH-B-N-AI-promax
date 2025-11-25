@@ -181,6 +181,20 @@ export const toggleAccountActive = (id: string): Account | null => {
   return updatedAccount;
 };
 
+export const deleteAccount = (id: string): boolean => {
+  const accounts = getAccounts();
+  const accountIndex = accounts.findIndex(a => a.id === id);
+  
+  if (accountIndex === -1) return false;
+
+  // Don't delete the main admin
+  if (accounts[accountIndex].username === 'admin') return false;
+
+  const newAccounts = accounts.filter(a => a.id !== id);
+  saveAccounts(newAccounts);
+  return true;
+};
+
 // --- Utils ---
 
 export const getAdminAuthStatus = () => {

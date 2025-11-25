@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle, CalendarDays } from 'lucide-react';
+import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle, CalendarDays, Trash2 } from 'lucide-react';
 import { 
   getAccounts, 
   createAccountByAdmin, 
   extendAccount, 
   toggleAccountActive, 
+  deleteAccount,
   Account, 
   AccountRole 
 } from '../services/accountService';
@@ -92,6 +93,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     if (confirm(`Bạn có chắc muốn ${action} tài khoản này?`)) {
       toggleAccountActive(id);
       loadAccounts();
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm("Bạn có chắc chắn muốn XÓA vĩnh viễn tài khoản này?")) {
+      const success = deleteAccount(id);
+      if (success) {
+        loadAccounts();
+      } else {
+        alert("Không thể xóa tài khoản này.");
+      }
     }
   };
 
@@ -269,13 +281,23 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                          
                          {/* Lock/Unlock Control */}
                          {acc.username !== 'admin' && (
-                           <button 
-                              onClick={() => handleToggleActive(acc.id, acc.isActive)}
-                              title={acc.isActive ? "Khóa tài khoản" : "Mở khóa"}
-                              className={`p-2 rounded-lg border transition-colors ${acc.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100 border-red-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-300'}`}
-                           >
-                              {acc.isActive ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                           </button>
+                           <>
+                             <button 
+                                onClick={() => handleToggleActive(acc.id, acc.isActive)}
+                                title={acc.isActive ? "Khóa tài khoản" : "Mở khóa"}
+                                className={`p-2 rounded-lg border transition-colors ${acc.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100 border-red-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-300'}`}
+                             >
+                                {acc.isActive ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                             </button>
+
+                             <button 
+                                onClick={() => handleDelete(acc.id)}
+                                title="Xóa tài khoản"
+                                className="p-2 rounded-lg border bg-red-600 text-white hover:bg-red-700 border-red-600 transition-colors"
+                             >
+                                <Trash2 className="w-4 h-4" />
+                             </button>
+                           </>
                          )}
                       </td>
                     </tr>
