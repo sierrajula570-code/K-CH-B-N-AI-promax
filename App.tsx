@@ -8,13 +8,16 @@ import ConfigSection from './components/ConfigSection';
 import ResultModal from './components/ResultModal';
 import SettingsModal from './components/SettingsModal';
 import HistoryModal from './components/HistoryModal';
+import LicenseModal from './components/LicenseModal';
+import AdminPanel from './components/AdminPanel';
+import AdminAuthModal from './components/AdminAuthModal';
 import { generateScript, calculateTargetLength } from './services/geminiService';
+import { getStoredLicense, validateLicenseKey, removeLicense, isAdminAuthenticated } from './services/licenseService';
 import { Zap, Loader2 } from 'lucide-react';
 
 function App() {
   const [inputText, setInputText] = useState('');
   const [inputMode, setInputMode] = useState<InputMode>(InputMode.IDEA);
-  
   const [selectedTemplate, setSelectedTemplate] = useState<ScriptTemplate>(TEMPLATES[0]);
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageOption>(LANGUAGES[0]);
   const [selectedDuration, setSelectedDuration] = useState<DurationOption>(DURATIONS[0]);
@@ -26,9 +29,15 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [targetStats, setTargetStats] = useState<{ min: number; max: number; target: number } | undefined>(undefined);
+
+  // LICENSE & ADMIN STATE
+  const [isLicenseValid, setIsLicenseValid] = useState<boolean>(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [licenseExpiry, setLicenseExpiry] = useState<number | null>(null);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem('script_history');
@@ -39,11 +48,34 @@ function App() {
         console.error("Failed to parse history", e);
       }
     }
+
+    // Initial Checks
+    checkLicense();
+    checkAdminStatus();
   }, []);
+
+  const checkAdminStatus = () => {
+      setIsAdmin(isAdminAuthenticated());
+  };
+
+  const checkLicense = () => {
+    const license = getStoredLicense();
+    if (license) {
+      const validation = validateLicenseKey(license.key);
+      if (validation.valid) {
+        setIsLicenseValid(true);
+        setLicenseExpiry(validation.expiryDate || null);
+      } else {
+        setIsLicenseValid(false);
+        removeLicense(); 
+      }
+    } else {
+      setIsLicenseValid(false);
+    }
+  };
 
   const saveToHistory = (content: string) => {
     if (!content || content.startsWith('⚠️')) return;
-
     const newItem: HistoryItem = {
       id: Date.now().toString(),
       timestamp: Date.now(),
@@ -51,7 +83,6 @@ function App() {
       inputPreview: inputText.substring(0, 50) + (inputText.length > 50 ? '...' : ''),
       content: content
     };
-
     const newHistory = [newItem, ...history];
     setHistory(newHistory);
     localStorage.setItem('script_history', JSON.stringify(newHistory));
@@ -75,10 +106,8 @@ function App() {
       alert("Vui lòng nhập ý tưởng hoặc nội dung.");
       return;
     }
-
     setIsLoading(true);
     setTargetStats(undefined);
-
     try {
       const stats = calculateTargetLength(selectedLanguage.id, selectedDuration.id, customMinutes);
       setTargetStats({
@@ -86,7 +115,6 @@ function App() {
         max: stats.maxChars,
         target: stats.targetChars
       });
-
       const result = await generateScript(
         inputText,
         selectedTemplate,
@@ -114,17 +142,50 @@ function App() {
     setIsModalOpen(true);
   };
 
+  // BLOCK ACCESS IF LICENSE INVALID
+  if (!isLicenseValid) {
+    return (
+      <>
+        <LicenseModal onSuccess={() => setIsLicenseValid(true)} />
+        
+        {/* Secret Admin Entry: Bottom Left Click 5 times */}
+        <div 
+            className="fixed bottom-0 left-0 w-20 h-20 z-[250]" 
+            onClick={(e) => { if(e.detail === 5) setIsAdminAuthOpen(true); }}
+        ></div>
+
+        <AdminAuthModal 
+            isOpen={isAdminAuthOpen} 
+            onClose={() => setIsAdminAuthOpen(false)}
+            onSuccess={() => {
+                setIsAdmin(true);
+                setIsAdminOpen(true); // Open panel immediately
+                setIsLicenseValid(true); // Bypass license check for admin
+            }}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <Header 
         onOpenSettings={() => setIsSettingsOpen(true)} 
         onOpenHistory={() => setIsHistoryOpen(true)}
         activeTab="new"
+        isAdmin={isAdmin}
+        onOpenAdminAuth={() => setIsAdminAuthOpen(true)}
+        onOpenAdminPanel={() => setIsAdminOpen(true)}
       />
 
+      {/* Expiry Banner */}
+      {licenseExpiry && !isAdmin && (
+          <div className="bg-primary-600 text-white text-[10px] text-center py-1 font-medium tracking-wide shadow-sm">
+              Bản quyền hợp lệ đến: {new Date(licenseExpiry).toLocaleDateString('vi-VN')}
+          </div>
+      )}
+
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10 flex flex-col gap-8">
-        
-        {/* Input Section is priority #1 */}
         <section>
            <InputSection 
             value={inputText} 
@@ -153,10 +214,8 @@ function App() {
             onSelectPerspective={setSelectedPerspective}
           />
         </section>
-
       </main>
 
-      {/* Sticky Bottom Action Bar */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 z-40 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
             <div className="hidden md:flex items-center gap-3 text-sm text-slate-500">
@@ -219,6 +278,18 @@ function App() {
         onSelect={handleOpenHistoryItem}
         onClearAll={clearAllHistory}
       />
+      
+      {/* Admin Popups */}
+      <AdminAuthModal 
+        isOpen={isAdminAuthOpen} 
+        onClose={() => setIsAdminAuthOpen(false)} 
+        onSuccess={() => {
+            setIsAdmin(true);
+            setIsAdminOpen(true);
+            setIsLicenseValid(true);
+        }}
+      />
+      <AdminPanel isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} />
     </div>
   );
 }

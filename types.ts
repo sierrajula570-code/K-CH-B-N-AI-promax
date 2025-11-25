@@ -42,3 +42,11 @@ export interface HistoryItem {
   inputPreview: string;
   content: string;
 }
+
+export interface License {
+  key: string;
+  expiryDate: number;
+  daysValid: number;
+  createdDate: number;
+  isActive: boolean;
+}
