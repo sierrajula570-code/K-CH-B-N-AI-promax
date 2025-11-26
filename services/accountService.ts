@@ -1,9 +1,11 @@
 
 import { auth, db } from './firebase';
+import { initializeApp, getApp, deleteApp } from "firebase/app";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
+  getAuth,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -102,26 +104,76 @@ export const signup = async (username: string, password: string): Promise<{ ok: 
 // Admin creating account directly
 export const createAccountByAdmin = async (
   username: string, 
+  emailInput: string | null,
   password: string, 
   role: AccountRole, 
   daysValid: number | null
 ): Promise<{ ok: boolean; error?: string; account?: Account }> => {
-  // Lưu ý: Firebase Client SDK sẽ tự động đăng nhập user mới tạo. 
-  // Để tránh điều này, admin nên dùng Cloud Functions. 
-  // Tuy nhiên, ở mức frontend-only, ta chấp nhận việc tạo xong sẽ bị logout admin hiện tại,
-  // hoặc dùng 1 app instance thứ 2. 
-  // ĐỂ ĐƠN GIẢN: Ta sẽ báo lỗi là tính năng này cần Backend thực thụ, 
-  // hoặc ta dùng "thủ thuật" tạo xong sign-in lại admin cũ (phức tạp).
   
-  // -> Giải pháp tạm thời cho Client-only: Dùng Secondary App (nâng cao) hoặc
-  // Khuyên dùng Signup bình thường rồi Admin duyệt.
-  
-  return { ok: false, error: "Trên Firebase Client, vui lòng để user tự đăng ký rồi Admin duyệt." };
+  // STRATEGY: Secondary App Instance
+  // Chúng ta tạo một app firebase phụ để tạo user mới, tránh việc Admin bị logout khỏi app chính.
+  let secondaryApp: any = null;
+
+  try {
+    const config = getApp().options; // Lấy config từ app chính
+    secondaryApp = initializeApp(config, "SecondaryApp");
+    const secondaryAuth = getAuth(secondaryApp);
+
+    // Xác định email
+    const email = emailInput && emailInput.trim() !== '' 
+      ? emailInput 
+      : `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
+
+    // 1. Tạo user trên Authentication (dùng secondary app)
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const user = userCredential.user;
+
+    // Tính toán ngày hết hạn
+    let expiresAt = null;
+    if (daysValid && daysValid > 0) {
+      expiresAt = Date.now() + (daysValid * 24 * 60 * 60 * 1000);
+    }
+
+    const newAccount: Account = {
+      id: user.uid,
+      username: username,
+      email: email,
+      role: role,
+      expiresAt: expiresAt,
+      createdAt: Date.now(),
+      isActive: true // Admin tạo thì active luôn
+    };
+
+    // 2. Lưu vào Firestore (dùng DB chính, vì Admin đang có quyền write)
+    await setDoc(doc(db, USERS_COLLECTION, user.uid), newAccount);
+
+    // 3. Cleanup: Logout user mới khỏi secondary app và xóa app đó
+    await signOut(secondaryAuth);
+    await deleteApp(secondaryApp);
+
+    return { ok: true, account: newAccount };
+
+  } catch (error: any) {
+    console.error("Admin Create Error:", error);
+    // Cleanup nếu lỗi
+    if (secondaryApp) {
+      try { await deleteApp(secondaryApp); } catch(e) {}
+    }
+
+    let msg = error.message;
+    if (msg.includes('email-already-in-use')) msg = 'Email/Username này đã tồn tại.';
+    if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu.';
+    return { ok: false, error: msg };
+  }
 };
 
 export const authenticate = async (username: string, password: string): Promise<{ ok: boolean; account?: Account; error?: string }> => {
   try {
-    const email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
+    // Kiểm tra xem input là email hay username
+    let email = username;
+    if (!username.includes('@')) {
+        email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
+    }
     
     // 1. Sign in Auth
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -210,10 +262,6 @@ export const deleteAccount = async (id: string): Promise<boolean> => {
   }
 };
 
-// Hàm khởi tạo Admin đầu tiên (chạy 1 lần thủ công hoặc check logic)
-// Với Firebase, bạn nên tạo user thủ công, sau đó vào Firestore Console sửa role thành 'admin' và isActive: true
 export const initializeDefaultAdmin = async () => {
-    // Không dùng logic tự tạo admin local nữa.
-    // Hướng dẫn: Đăng ký 1 user tên "admin", sau đó vào Firebase Console -> Firestore
-    // Tìm document của user đó, sửa field "role": "admin", "isActive": true
+    // No-op
 };
