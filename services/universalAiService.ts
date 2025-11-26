@@ -272,10 +272,11 @@ async function callGoogle(apiKey: string, model: string, system: string, user: s
   // Handling retry logic internally for Google as it's prone to 429 in free tier
   const generate = async (retries = 3, backoff = 5000): Promise<string> => {
     try {
+      // Lower temperature to 0.7 to avoid verbose hallucination
       const response = await ai.models.generateContent({
         model: model,
         contents: user,
-        config: { systemInstruction: system, temperature: 0.85 }
+        config: { systemInstruction: system, temperature: 0.7 }
       });
       return response.text || "";
     } catch (error: any) {
@@ -352,6 +353,8 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
       // Dynamic Chunk Target calculation
       // Divide total target by parts to ensure we don't overshoot
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
+      // Rough estimate for words (Vietnamese/English vary, but 4.5 chars/word is safe)
+      const wordTarget = Math.round(chunkCharsTarget / 4.5); 
       
       let fullScript = "";
       let previousContext = "";
@@ -367,7 +370,7 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
           partPrompt = `
             *** PART 1 of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars).
+            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
             TOPIC: "${input}"
             INSTRUCTIONS:
             1. Start with a powerful HOOK.
@@ -378,20 +381,26 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
             STRICT RULES: 
             - DO NOT output "Part 1" header.
             - Start directly with the story.
-            - Keep pacing moderate. Do not rush, but do not be overly verbose.
+            - DO NOT EXCEED THE LENGTH significantly. Be concise and impactful.
           `;
         } else {
           partPrompt = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars).
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
             TOPIC: "${input}"
             CONTEXT FROM PREVIOUS PART: "...${previousContext.slice(-500)}"
+            
             CRITICAL SEAMLESS INSTRUCTIONS:
             1. START IMMEDIATELY where the context left off. 
             2. DO NOT write an intro (No "Welcome back", No "Here is the next part").
             3. DO NOT use headers like "Chapter 2".
             4. Maintain the story flow.
+            
+            STRICT LENGTH CONSTRAINT:
+            - Target: ~${chunkCharsTarget} chars.
+            - DO NOT WRITE TOO MUCH. Quality over Quantity.
+            
             ${isLast ? "5. WRAP UP: Bring all threads to a Climax and then a thought-provoking Conclusion." : "5. End this part on a transition, ready for the next part."}
           `;
         }

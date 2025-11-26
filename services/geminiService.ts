@@ -167,13 +167,8 @@ export const generateScript = async (
       *** PERSONAL CONTEXT / BRAND VOICE ***
       The user has provided specific background information or a specific writing style they prefer.
       You MUST incorporate this context into the tone, style, and content of the script.
-      
-      USER CONTEXT:
-      """
-      ${personalContext}
-      """
-      
-      INSTRUCTION: Apply this context implicitly. Do not mention "The user said...". Just write in this voice/context.
+      USER CONTEXT: """${personalContext}"""
+      INSTRUCTION: Apply this context implicitly.
     `;
   }
 
@@ -202,7 +197,7 @@ export const generateScript = async (
     
     2. NO LISTS / NO BULLET POINTS:
        - ABSOLUTELY NO using "-", "*", "1.", "2.".
-       - Transform all lists into flowing narrative sentences (e.g., instead of "1. Eat healthy", say "First, you need to prioritize your diet...").
+       - Transform all lists into flowing narrative sentences.
     
     3. CLEAN AUDIO ONLY:
        - NO [Intro], [Music], [Sound Effect], [Scene], [Character Name].
@@ -238,7 +233,7 @@ export const generateScript = async (
       const response = await generateWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: prompt,
-        config: { systemInstruction: baseInstruction, temperature: 0.85 }
+        config: { systemInstruction: baseInstruction, temperature: 0.7 }
       });
       
       return response.text || "No content.";
@@ -247,6 +242,7 @@ export const generateScript = async (
       // --- SEAMLESS CHAINED GENERATION STRATEGY ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
+      const wordTarget = Math.round(chunkCharsTarget / 4.5); 
 
       let fullScript = "";
       let previousContext = ""; 
@@ -263,7 +259,7 @@ export const generateScript = async (
           partPrompt = `
             *** PART 1 of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars).
+            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
             TOPIC: "${input}"
 
             INSTRUCTIONS:
@@ -272,13 +268,13 @@ export const generateScript = async (
             3. Each paragraph must be 3-5 sentences. NO LISTS.
             4. END this part in the middle of a transition.
             
-            STRICT RULE: Write moderately. Do not be overly verbose.
+            STRICT RULE: Write concise. Do not exceed ~${chunkCharsTarget} characters.
           `;
         } else {
           partPrompt = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars).
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
             TOPIC: "${input}"
 
             CONTEXT FROM PREVIOUS PART (Last 500 chars):
@@ -287,15 +283,16 @@ export const generateScript = async (
             CRITICAL SEAMLESS INSTRUCTIONS:
             1. START IMMEDIATELY where the context left off. 
             2. DO NOT write an intro (No "Welcome back", No "In this part").
-            3. Maintain the "Chapter" structure: Introduce a new Mini-Hook for this section immediately.
-            4. Paragraphs: 3-5 sentences. NO LISTS.
+            3. Maintain the "Chapter" structure.
+            
+            STRICT LENGTH CONSTRAINT:
+            - Target: ~${chunkCharsTarget} chars.
+            - DO NOT WRITE TOO MUCH. Quality over Quantity.
             
             ${isLast 
               ? "5. WRAP UP: Bring all threads to a Climax and then a thought-provoking Conclusion." 
               : "5. End this part on a transition, ready for the next part."
             }
-
-            STRICT RULE: EXPAND DEEPLY BUT KEEP PACING. WRITE IN ${language.code.toUpperCase()}.
           `;
         }
 
@@ -304,7 +301,7 @@ export const generateScript = async (
         const response = await generateWithRetry(ai, {
           model: 'gemini-2.5-flash',
           contents: partPrompt,
-          config: { systemInstruction: baseInstruction, temperature: 0.85 }
+          config: { systemInstruction: baseInstruction, temperature: 0.7 }
         });
 
         let partText = response.text || "";
