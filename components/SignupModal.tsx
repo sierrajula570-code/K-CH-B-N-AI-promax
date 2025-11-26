@@ -17,26 +17,27 @@ const SignupModal: React.FC<SignupModalProps> = ({ isOpen, onClose, onSuccess })
 
   if (!isOpen) return null;
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    // Simulate network delay
-    setTimeout(() => {
-      const result = signup(username, password);
+    try {
+      const result = await signup(username, password);
       
       if (result.ok) {
         onSuccess();
-        // Clear form
         setUsername('');
         setPassword('');
         onClose();
       } else {
         setError(result.error || 'Đăng ký thất bại.');
       }
+    } catch (e: any) {
+        setError(e.message || 'Lỗi kết nối.');
+    } finally {
       setLoading(false);
-    }, 600);
+    }
   };
 
   return (

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { LogIn, Lock, User, AlertCircle, UserPlus } from 'lucide-react';
-import { authenticate, Account, setAdminAuthStatus } from '../services/accountService';
+import { authenticate, Account } from '../services/accountService';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -18,27 +18,25 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSuccess, onO
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    // Simulate a tiny network delay for better UX
-    setTimeout(() => {
-      const result = authenticate(username, password);
+    try {
+      const result = await authenticate(username, password);
       
       if (result.ok && result.account) {
-        // If admin, persist the session specifically for this device
-        if (result.account.role === 'admin') {
-          setAdminAuthStatus(true);
-        }
         onSuccess(result.account);
         onClose();
       } else {
         setError(result.error || 'Đăng nhập thất bại');
       }
+    } catch (e: any) {
+       setError(e.message || 'Lỗi kết nối');
+    } finally {
       setLoading(false);
-    }, 500);
+    }
   };
 
   return (
@@ -61,7 +59,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSuccess, onO
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                Tài khoản
+                Tài khoản (Username)
               </label>
               <div className="relative group">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-primary-500 transition-colors" />

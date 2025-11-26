@@ -1,9 +1,11 @@
+
 import React, { useState } from 'react';
 import { LanguageOption, DurationOption, PerspectiveOption } from '../types';
 import { LANGUAGES, DURATIONS, PERSPECTIVES } from '../constants';
-import { Languages, Clock, Settings2, ChevronDown, User } from 'lucide-react';
+import { Languages, Clock, Settings2, ChevronDown, User, Crown } from 'lucide-react';
 
 interface Props {
+  selectedTemplateId: string;
   selectedLanguage: string;
   onSelectLanguage: (lang: LanguageOption) => void;
   selectedDuration: string;
@@ -12,9 +14,14 @@ interface Props {
   setCustomMinutes: (min: number) => void;
   selectedPerspective: string;
   onSelectPerspective: (perspective: PerspectiveOption) => void;
+  
+  // New props for Persona selection
+  selectedPersona: 'auto' | 'buffett' | 'munger';
+  onSelectPersona: (p: 'auto' | 'buffett' | 'munger') => void;
 }
 
 const ConfigSection: React.FC<Props> = ({
+  selectedTemplateId,
   selectedLanguage,
   onSelectLanguage,
   selectedDuration,
@@ -22,9 +29,14 @@ const ConfigSection: React.FC<Props> = ({
   customMinutes,
   setCustomMinutes,
   selectedPerspective,
-  onSelectPerspective
+  onSelectPerspective,
+  selectedPersona,
+  onSelectPersona
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
+
+  // Check if we need to show the Persona selector (Only for Charlie Munger template)
+  const showPersonaSelector = selectedTemplateId === 'charlie-munger';
 
   return (
     <div className="bg-white rounded-2xl shadow-soft border border-slate-100 mb-24 overflow-hidden transition-all duration-300">
@@ -39,7 +51,7 @@ const ConfigSection: React.FC<Props> = ({
           </div>
           <div className="text-left">
              <h3 className="text-sm font-bold text-slate-800 group-hover:text-primary-700 transition-colors">Cấu hình nâng cao</h3>
-             <p className="text-xs text-slate-500">Ngôn ngữ, Thời lượng & Ngôi kể</p>
+             <p className="text-xs text-slate-500">Ngôn ngữ, Thời lượng, Ngôi kể {showPersonaSelector && '& Nhân vật'}</p>
           </div>
         </div>
         
@@ -52,11 +64,59 @@ const ConfigSection: React.FC<Props> = ({
       <div 
         className={`
           transition-all duration-500 ease-in-out overflow-hidden bg-white
-          ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'}
+          ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[1000px] opacity-100'}
         `}
       >
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8 border-t border-slate-100">
+        <div className={`p-6 grid grid-cols-1 gap-8 border-t border-slate-100 ${showPersonaSelector ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
           
+          {/* Persona Selector (Conditionally Rendered) */}
+          {showPersonaSelector && (
+            <div className="animate-in fade-in slide-in-from-left-4 duration-300">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <div className="p-1 bg-yellow-100 rounded text-yellow-600"><Crown className="w-3.5 h-3.5" /></div>
+                Chọn Nhân Vật
+              </h4>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => onSelectPersona('auto')}
+                  className={`
+                    px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all duration-200
+                    ${selectedPersona === 'auto'
+                      ? 'border-primary-500 bg-primary-50 text-primary-700 ring-1 ring-primary-500'
+                      : 'border-slate-200 text-slate-600 hover:border-primary-300 hover:bg-slate-50'
+                    }
+                  `}
+                >
+                  ✨ Tự động (Theo nội dung)
+                </button>
+                <button
+                  onClick={() => onSelectPersona('buffett')}
+                  className={`
+                    px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all duration-200
+                    ${selectedPersona === 'buffett'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
+                      : 'border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50'
+                    }
+                  `}
+                >
+                  🍔 Warren Buffett (Lạc quan)
+                </button>
+                <button
+                  onClick={() => onSelectPersona('munger')}
+                  className={`
+                    px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all duration-200
+                    ${selectedPersona === 'munger'
+                      ? 'border-slate-600 bg-slate-100 text-slate-800 ring-1 ring-slate-600'
+                      : 'border-slate-200 text-slate-600 hover:border-slate-400 hover:bg-slate-50'
+                    }
+                  `}
+                >
+                  👓 Charlie Munger (Thực tế)
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Language Section */}
           <div>
             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">

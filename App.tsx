@@ -11,24 +11,28 @@ import SettingsModal from './components/SettingsModal';
 import HistoryModal from './components/HistoryModal';
 import AdminPanel from './components/AdminPanel';
 import LoginModal from './components/LoginModal';
-import SignupModal from './components/SignupModal'; // New Import
+import SignupModal from './components/SignupModal';
+import FirebaseConfigModal from './components/FirebaseConfigModal'; // New Import
 import { generateScript, calculateTargetLength } from './services/geminiService';
 import { 
-  getAccounts, 
-  initializeDefaultAdmin, 
-  getAdminAuthStatus,
+  getUserProfile,
   Account,
-  setAdminAuthStatus
+  logout
 } from './services/accountService';
+import { auth, isConfigured } from './services/firebase'; // Import isConfigured
+import { onAuthStateChanged } from 'firebase/auth';
 import { Zap, Loader2 } from 'lucide-react';
 
 function App() {
   // Auth State
   const [currentAccount, setCurrentAccount] = useState<Account | null>(null);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const [isSignupOpen, setIsSignupOpen] = useState(false); // New state
+  const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  // Configuration State
+  const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(!isConfigured); // Force open if not configured
 
   // App Logic State
   const [inputText, setInputText] = useState('');
@@ -39,6 +43,8 @@ function App() {
   const [selectedDuration, setSelectedDuration] = useState<DurationOption>(DURATIONS[0]);
   const [customMinutes, setCustomMinutes] = useState<number>(5);
   const [selectedPerspective, setSelectedPerspective] = useState<PerspectiveOption>(PERSPECTIVES[0]);
+  
+  const [selectedPersona, setSelectedPersona] = useState<'auto' | 'buffett' | 'munger'>('auto');
 
   const [isLoading, setIsLoading] = useState(false);
   const [generatedContent, setGeneratedContent] = useState<string | null>(null);
@@ -49,30 +55,44 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [targetStats, setTargetStats] = useState<{ min: number; max: number; target: number } | undefined>(undefined);
 
-  // --- Auth Initialization ---
+  // --- Auth Initialization with Firebase ---
   useEffect(() => {
-    // 1. Ensure accounts exist (creates default admin if empty)
-    initializeDefaultAdmin();
+    // Only attempt auth connection if Firebase is actually configured
+    if (!isConfigured) {
+      setIsCheckingAuth(false);
+      return; 
+    }
 
-    // 2. Check for persisted Admin session
-    const accounts = getAccounts();
-    const isDeviceAdmin = getAdminAuthStatus();
-
-    if (isDeviceAdmin) {
-      // Find the admin account
-      const adminAcc = accounts.find(a => a.role === 'admin' && a.isActive);
-      if (adminAcc) {
-        setCurrentAccount(adminAcc);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setIsCheckingAuth(true);
+      if (user) {
+        // User is signed in, fetch profile details
+        const profile = await getUserProfile(user.uid);
+        if (profile && profile.isActive) {
+           // Check expiry
+           if (profile.expiresAt !== null && Date.now() > profile.expiresAt) {
+             alert("Tài khoản đã hết hạn.");
+             await logout();
+             setCurrentAccount(null);
+             setIsLoginOpen(true);
+           } else {
+             setCurrentAccount(profile);
+             setIsLoginOpen(false);
+           }
+        } else {
+          // Profile not found or inactive
+          setCurrentAccount(null);
+          setIsLoginOpen(true); 
+        }
       } else {
-        // Admin account might have been deleted or deactivated
+        // User is signed out
+        setCurrentAccount(null);
         setIsLoginOpen(true);
       }
-    } else {
-      // Not an admin device, require login
-      setIsLoginOpen(true);
-    }
-    
-    setIsCheckingAuth(false);
+      setIsCheckingAuth(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // --- History Logic ---
@@ -141,7 +161,8 @@ function App() {
         selectedDuration,
         inputMode,
         selectedPerspective,
-        customMinutes
+        customMinutes,
+        selectedPersona
       );
       setGeneratedContent(result);
       saveToHistory(result);
@@ -163,15 +184,29 @@ function App() {
 
   const handleLoginSuccess = (account: Account) => {
     setCurrentAccount(account);
-    if (account.role === 'admin') {
-      localStorage.setItem('app_admin_auth', 'true');
-    }
     setIsLoginOpen(false);
   };
 
-  // --- Auth Checks ---
+  // 1. If not configured, Force Config Modal
+  if (isFirebaseConfigOpen) {
+      return (
+          <FirebaseConfigModal 
+              isOpen={true} 
+              onClose={() => {
+                  if (isConfigured) setIsFirebaseConfigOpen(false);
+              }} 
+          />
+      );
+  }
+
+  // 2. Loading State
   if (isCheckingAuth) {
-    return null; // Avoid flicker
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin mr-3" />
+        Đang tải dữ liệu...
+      </div>
+    );
   }
 
   const isAdmin = currentAccount?.role === 'admin';
@@ -208,6 +243,7 @@ function App() {
 
             <section>
               <ConfigSection 
+                selectedTemplateId={selectedTemplate.id}
                 selectedLanguage={selectedLanguage.id}
                 onSelectLanguage={setSelectedLanguage}
                 selectedDuration={selectedDuration.id}
@@ -216,6 +252,8 @@ function App() {
                 setCustomMinutes={setCustomMinutes}
                 selectedPerspective={selectedPerspective.id}
                 onSelectPerspective={setSelectedPerspective}
+                selectedPersona={selectedPersona}
+                onSelectPersona={setSelectedPersona}
               />
             </section>
           </main>
@@ -272,6 +310,11 @@ function App() {
           <SettingsModal 
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
+            onOpenFirebaseConfig={() => {
+                setIsFirebaseConfigOpen(true);
+                // We keep Settings open or close it? Close settings to focus on DB config
+                setIsSettingsOpen(false);
+            }}
           />
 
           <HistoryModal
@@ -292,8 +335,8 @@ function App() {
         // Login Screen Full Overlay
         <div className="relative min-h-screen bg-slate-900">
           <LoginModal 
-            isOpen={isLoginOpen && !isSignupOpen}
-            onClose={() => {}} // Block closing
+            isOpen={isLoginOpen && !isSignupOpen && !isFirebaseConfigOpen}
+            onClose={() => {}} 
             onSuccess={handleLoginSuccess}
             onOpenSignup={() => {
               setIsLoginOpen(false);
@@ -304,15 +347,23 @@ function App() {
             isOpen={isSignupOpen}
             onClose={() => {
               setIsSignupOpen(false);
-              setIsLoginOpen(true); // Return to login on close
+              setIsLoginOpen(true); 
             }}
             onSuccess={() => {
               setIsSignupOpen(false);
               setIsLoginOpen(true);
-              alert('Đăng ký thành công! Vui lòng liên hệ Admin để kích hoạt tài khoản.');
+              alert('Đăng ký thành công! Vui lòng đợi Quản trị viên kích hoạt.');
             }}
           />
         </div>
+      )}
+
+      {/* Render Config Modal on top if needed (e.g. opened from Settings while logged in) */}
+      {isFirebaseConfigOpen && currentAccount && (
+          <FirebaseConfigModal 
+              isOpen={true}
+              onClose={() => setIsFirebaseConfigOpen(false)}
+          />
       )}
     </div>
   );

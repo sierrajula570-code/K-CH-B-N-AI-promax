@@ -1,212 +1,219 @@
 
+import { auth, db } from './firebase';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc,
+  query,
+  where
+} from 'firebase/firestore';
+
 export type AccountRole = 'admin' | 'user';
 
 export interface Account {
-  id: string;
-  username: string;
-  password: string; // Plain text for demo
+  id: string; // Firebase UID
+  username: string; // Trong Firebase Auth là email, nhưng ta map field này để hiển thị
+  email: string;
   role: AccountRole;
-  expiresAt: number | null; // timestamp ms, null = never expires / not set
+  expiresAt: number | null; 
   createdAt: number;
   isActive: boolean;
 }
 
-const ACCOUNTS_STORAGE_KEY = 'kb_accounts';
-const ADMIN_AUTH_KEY = 'app_admin_auth';
+const USERS_COLLECTION = 'users';
 
 // --- Helpers ---
 
-export const getAccounts = (): Account[] => {
-  if (typeof window === 'undefined') return [];
+// Lấy thông tin user profile từ Firestore dựa trên UID
+export const getUserProfile = async (uid: string): Promise<Account | null> => {
   try {
-    const stored = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const docRef = doc(db, USERS_COLLECTION, uid);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data() as Account;
+    }
+    return null;
   } catch (e) {
-    return [];
+    console.error("Error fetching user profile:", e);
+    return null;
   }
 };
 
-export const saveAccounts = (accounts: Account[]) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
-};
-
-export const initializeDefaultAdmin = () => {
-  const accounts = getAccounts();
-  const adminExists = accounts.some(a => a.role === 'admin');
-  
-  if (!adminExists) {
-    const defaultAdmin: Account = {
-      id: 'admin-default',
-      username: 'admin',
-      password: 'admin123',
-      role: 'admin',
-      expiresAt: null,
-      createdAt: Date.now(),
-      isActive: true
-    };
-    saveAccounts([...accounts, defaultAdmin]);
-    console.log('Default admin account created: admin / admin123');
+export const getAccounts = async (): Promise<Account[]> => {
+  try {
+    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+    const accounts: Account[] = [];
+    querySnapshot.forEach((doc) => {
+      accounts.push(doc.data() as Account);
+    });
+    return accounts;
+  } catch (e) {
+    console.error("Error getting accounts:", e);
+    return [];
   }
 };
 
 // --- Core Logic ---
 
 // User Self-Registration
-export const signup = (username: string, password: string): { ok: boolean; error?: string; account?: Account } => {
-  const accounts = getAccounts();
-  
-  // Validate input
-  if (!username || username.trim().length < 3) {
-    return { ok: false, error: 'Tên tài khoản phải có ít nhất 3 ký tự.' };
-  }
-  if (!password || password.length < 3) {
-    return { ok: false, error: 'Mật khẩu phải có ít nhất 3 ký tự.' };
-  }
+// Lưu ý: Firebase Auth yêu cầu Email, nên ta sẽ dùng username làm email giả lập hoặc yêu cầu nhập email
+export const signup = async (username: string, password: string): Promise<{ ok: boolean; error?: string; account?: Account }> => {
+  try {
+    // Để đơn giản, ta tự tạo email giả từ username nếu người dùng chỉ nhập username
+    // Hoặc tốt nhất là sửa UI để nhập email. Ở đây ta giả lập email:
+    const email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
 
-  // Check duplicates
-  if (accounts.some(a => a.username.toLowerCase() === username.trim().toLowerCase())) {
-    return { ok: false, error: 'Tên tài khoản đã tồn tại.' };
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    const newAccount: Account = {
+      id: user.uid,
+      username: username,
+      email: email,
+      role: 'user',
+      expiresAt: null, 
+      createdAt: Date.now(),
+      isActive: false // Mặc định chờ duyệt
+    };
+
+    // Lưu thông tin bổ sung vào Firestore
+    await setDoc(doc(db, USERS_COLLECTION, user.uid), newAccount);
+
+    return { ok: true, account: newAccount };
+  } catch (error: any) {
+    console.error("Signup error:", error);
+    let msg = error.message;
+    if (msg.includes('email-already-in-use')) msg = 'Tài khoản/Email này đã tồn tại.';
+    if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu (tối thiểu 6 ký tự).';
+    return { ok: false, error: msg };
   }
-
-  const newAccount: Account = {
-    id: Date.now().toString(),
-    username: username.trim(),
-    password: password,
-    role: 'user',
-    expiresAt: null, // Pending approval/extension
-    createdAt: Date.now(),
-    isActive: false // Pending approval
-  };
-
-  saveAccounts([...accounts, newAccount]);
-  return { ok: true, account: newAccount };
 };
 
 // Admin creating account directly
-export const createAccountByAdmin = (
+export const createAccountByAdmin = async (
   username: string, 
   password: string, 
   role: AccountRole, 
   daysValid: number | null
-): { ok: boolean; error?: string; account?: Account } => {
+): Promise<{ ok: boolean; error?: string; account?: Account }> => {
+  // Lưu ý: Firebase Client SDK sẽ tự động đăng nhập user mới tạo. 
+  // Để tránh điều này, admin nên dùng Cloud Functions. 
+  // Tuy nhiên, ở mức frontend-only, ta chấp nhận việc tạo xong sẽ bị logout admin hiện tại,
+  // hoặc dùng 1 app instance thứ 2. 
+  // ĐỂ ĐƠN GIẢN: Ta sẽ báo lỗi là tính năng này cần Backend thực thụ, 
+  // hoặc ta dùng "thủ thuật" tạo xong sign-in lại admin cũ (phức tạp).
   
-  const accounts = getAccounts();
+  // -> Giải pháp tạm thời cho Client-only: Dùng Secondary App (nâng cao) hoặc
+  // Khuyên dùng Signup bình thường rồi Admin duyệt.
   
-  if (accounts.some(a => a.username.toLowerCase() === username.toLowerCase())) {
-    return { ok: false, error: 'Tên tài khoản đã tồn tại' };
-  }
-
-  const expiresAt = daysValid ? Date.now() + (daysValid * 24 * 60 * 60 * 1000) : null;
-
-  const newAccount: Account = {
-    id: Date.now().toString(),
-    username,
-    password,
-    role,
-    expiresAt,
-    createdAt: Date.now(),
-    isActive: true // Admin created accounts are active by default
-  };
-
-  saveAccounts([...accounts, newAccount]);
-  return { ok: true, account: newAccount };
+  return { ok: false, error: "Trên Firebase Client, vui lòng để user tự đăng ký rồi Admin duyệt." };
 };
 
-export const authenticate = (username: string, password: string): { ok: boolean; account?: Account; error?: string } => {
-  // Ensure we have accounts loaded (and default admin if needed)
-  initializeDefaultAdmin();
-  const accounts = getAccounts();
-  
-  const account = accounts.find(a => a.username.toLowerCase() === username.toLowerCase());
+export const authenticate = async (username: string, password: string): Promise<{ ok: boolean; account?: Account; error?: string }> => {
+  try {
+    const email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
+    
+    // 1. Sign in Auth
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
 
-  if (!account) {
-    return { ok: false, error: 'Tài khoản không tồn tại.' };
+    // 2. Get Firestore Profile
+    const account = await getUserProfile(user.uid);
+
+    if (!account) {
+      await signOut(auth);
+      return { ok: false, error: 'Không tìm thấy thông tin hồ sơ người dùng.' };
+    }
+
+    // 3. Check Active & Expiry
+    if (!account.isActive) {
+      await signOut(auth);
+      return { ok: false, error: 'Tài khoản chưa được kích hoạt hoặc bị khóa.' };
+    }
+
+    if (account.expiresAt !== null && Date.now() > account.expiresAt) {
+      await signOut(auth);
+      return { ok: false, error: 'Tài khoản đã hết hạn sử dụng.' };
+    }
+
+    return { ok: true, account };
+  } catch (error: any) {
+    console.error("Login error:", error);
+    let msg = error.message;
+    if (msg.includes('user-not-found') || msg.includes('wrong-password') || msg.includes('invalid-credential')) {
+      msg = 'Tài khoản hoặc mật khẩu không đúng.';
+    }
+    return { ok: false, error: msg };
   }
-
-  if (account.password !== password) {
-    return { ok: false, error: 'Mật khẩu không đúng.' };
-  }
-
-  if (!account.isActive) {
-    return { ok: false, error: 'Tài khoản chưa được kích hoạt hoặc bị khóa.' };
-  }
-
-  if (account.expiresAt !== null && Date.now() > account.expiresAt) {
-    return { ok: false, error: 'Tài khoản đã hết hạn sử dụng.' };
-  }
-
-  return { ok: true, account };
 };
 
-export const extendAccount = (id: string, days: number): Account | null => {
-  const accounts = getAccounts();
-  const accountIndex = accounts.findIndex(a => a.id === id);
-  
-  if (accountIndex === -1) return null;
-
-  const account = accounts[accountIndex];
-  
-  // Calculate new expiry
-  // If currently expired or null, start from now. If valid, add to current expiry.
-  const baseTime = (account.expiresAt && account.expiresAt > Date.now()) ? account.expiresAt : Date.now();
-  const newExpiry = baseTime + (days * 24 * 60 * 60 * 1000);
-
-  // When extending, we typically also want to ensure the account is active (if it was pending)
-  const updatedAccount = { 
-    ...account, 
-    expiresAt: newExpiry,
-    isActive: true 
-  };
-  
-  accounts[accountIndex] = updatedAccount;
-  
-  saveAccounts(accounts);
-  return updatedAccount;
+export const logout = async () => {
+  await signOut(auth);
+  localStorage.removeItem('app_admin_auth');
 };
 
-export const toggleAccountActive = (id: string): Account | null => {
-  const accounts = getAccounts();
-  const accountIndex = accounts.findIndex(a => a.id === id);
-  
-  if (accountIndex === -1) return null;
+export const extendAccount = async (id: string, days: number): Promise<boolean> => {
+  try {
+    const account = await getUserProfile(id);
+    if (!account) return false;
 
-  // Don't lock the main admin
-  if (accounts[accountIndex].username === 'admin') return accounts[accountIndex];
+    const baseTime = (account.expiresAt && account.expiresAt > Date.now()) ? account.expiresAt : Date.now();
+    const newExpiry = baseTime + (days * 24 * 60 * 60 * 1000);
 
-  const updatedAccount = { ...accounts[accountIndex], isActive: !accounts[accountIndex].isActive };
-  accounts[accountIndex] = updatedAccount;
-  
-  saveAccounts(accounts);
-  return updatedAccount;
-};
-
-export const deleteAccount = (id: string): boolean => {
-  const accounts = getAccounts();
-  const accountIndex = accounts.findIndex(a => a.id === id);
-  
-  if (accountIndex === -1) return false;
-
-  // Don't delete the main admin
-  if (accounts[accountIndex].username === 'admin') return false;
-
-  const newAccounts = accounts.filter(a => a.id !== id);
-  saveAccounts(newAccounts);
-  return true;
-};
-
-// --- Utils ---
-
-export const getAdminAuthStatus = () => {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(ADMIN_AUTH_KEY) === 'true';
-};
-
-export const setAdminAuthStatus = (isAuth: boolean) => {
-  if (typeof window === 'undefined') return;
-  if (isAuth) {
-    localStorage.setItem(ADMIN_AUTH_KEY, 'true');
-  } else {
-    localStorage.removeItem(ADMIN_AUTH_KEY);
+    await updateDoc(doc(db, USERS_COLLECTION, id), {
+      expiresAt: newExpiry,
+      isActive: true
+    });
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
   }
+};
+
+export const toggleAccountActive = async (id: string): Promise<boolean> => {
+  try {
+    const account = await getUserProfile(id);
+    if (!account) return false;
+    
+    // Không khoá admin gốc (nếu có logic check id)
+    if (account.username === 'admin') return false;
+
+    await updateDoc(doc(db, USERS_COLLECTION, id), {
+      isActive: !account.isActive
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+export const deleteAccount = async (id: string): Promise<boolean> => {
+  try {
+    // Chỉ xoá document trong Firestore. 
+    // User trong Auth vẫn còn (cần Cloud Functions để xoá sạch hoàn toàn).
+    // Nhưng xoá trong Firestore thì user đó cũng không login được nữa (do bước check profile).
+    await deleteDoc(doc(db, USERS_COLLECTION, id));
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Hàm khởi tạo Admin đầu tiên (chạy 1 lần thủ công hoặc check logic)
+// Với Firebase, bạn nên tạo user thủ công, sau đó vào Firestore Console sửa role thành 'admin' và isActive: true
+export const initializeDefaultAdmin = async () => {
+    // Không dùng logic tự tạo admin local nữa.
+    // Hướng dẫn: Đăng ký 1 user tên "admin", sau đó vào Firebase Console -> Firestore
+    // Tìm document của user đó, sửa field "role": "admin", "isActive": true
 };

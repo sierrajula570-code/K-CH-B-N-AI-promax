@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle, CalendarDays, Trash2 } from 'lucide-react';
+import { Users, X, UserPlus, Search, RefreshCw, Lock, Unlock, Clock, Shield, CheckCircle, CalendarDays, Trash2, LogOut } from 'lucide-react';
 import { 
   getAccounts, 
   createAccountByAdmin, 
   extendAccount, 
   toggleAccountActive, 
   deleteAccount,
+  logout,
   Account, 
   AccountRole 
 } from '../services/accountService';
@@ -18,6 +19,7 @@ interface AdminPanelProps {
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   
   // New Account Form State (Admin creation)
   const [newUsername, setNewUsername] = useState('');
@@ -36,11 +38,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     }
   }, [isOpen]);
 
-  const loadAccounts = () => {
-    setAccounts(getAccounts());
+  const loadAccounts = async () => {
+    setIsLoading(true);
+    const data = await getAccounts();
+    setAccounts(data);
+    setIsLoading(false);
   };
 
-  const handleCreateAccount = (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
     setFormSuccess('');
@@ -52,7 +57,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
 
     const days = newDays.trim() === '' ? null : parseInt(newDays);
     
-    const result = createAccountByAdmin(newUsername, newPassword, newRole, days);
+    // Lưu ý: createAccountByAdmin trên Firebase Client có hạn chế, nhưng vẫn để UI
+    const result = await createAccountByAdmin(newUsername, newPassword, newRole, days);
 
     if (result.ok) {
       setFormSuccess(`Đã tạo tài khoản "${newUsername}" thành công!`);
@@ -65,8 +71,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleExtend = (id: string, currentActive: boolean) => {
-    // Get custom days from state, default to 30 if not set or 0
+  const handleExtend = async (id: string, currentActive: boolean) => {
     const daysToExtend = extendDaysMap[id] || 30;
 
     if (daysToExtend <= 0) {
@@ -74,36 +79,40 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
         return;
     }
 
-    // If account is inactive, this action implies approval/activation + extension
     const message = currentActive 
         ? `Gia hạn thêm ${daysToExtend} ngày cho tài khoản này?`
         : `KÍCH HOẠT và Gia hạn ${daysToExtend} ngày cho tài khoản này?`;
 
     if (confirm(message)) {
-      extendAccount(id, daysToExtend); // accountService.extendAccount also sets isActive = true
+      await extendAccount(id, daysToExtend);
       loadAccounts();
-      
-      // Optional: Reset input back to undefined (shows placeholder 30) or keep it
-      // setExtendDaysMap(prev => ({...prev, [id]: 0})); 
     }
   };
 
-  const handleToggleActive = (id: string, currentStatus: boolean) => {
+  const handleToggleActive = async (id: string, currentStatus: boolean) => {
     const action = currentStatus ? "KHOÁ" : "MỞ KHOÁ";
     if (confirm(`Bạn có chắc muốn ${action} tài khoản này?`)) {
-      toggleAccountActive(id);
+      await toggleAccountActive(id);
       loadAccounts();
     }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Bạn có chắc chắn muốn XÓA vĩnh viễn tài khoản này?")) {
-      const success = deleteAccount(id);
+      const success = await deleteAccount(id);
       if (success) {
         loadAccounts();
       } else {
         alert("Không thể xóa tài khoản này.");
       }
+    }
+  };
+
+  const handleLogout = async () => {
+    if (confirm("Đăng xuất khỏi hệ thống?")) {
+      await logout();
+      onClose();
+      // App.tsx auth listener will handle redirection
     }
   };
 
@@ -120,13 +129,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                 <Users className="w-6 h-6 text-white" />
              </div>
              <div>
-                <h2 className="text-xl font-bold text-white">Quản lý Tài khoản</h2>
+                <h2 className="text-xl font-bold text-white">Quản lý Tài khoản (Firebase)</h2>
                 <p className="text-xs text-slate-400">Hệ thống phân quyền & người dùng</p>
              </div>
            </div>
-           <button onClick={onClose} className="text-slate-400 hover:text-white bg-white/10 p-2 rounded-lg transition-colors">
-             <X className="w-5 h-5" />
-           </button>
+           <div className="flex items-center gap-3">
+             <button 
+               onClick={handleLogout}
+               className="flex items-center gap-2 bg-red-600/20 hover:bg-red-600/40 text-red-200 px-3 py-2 rounded-lg text-xs font-bold transition-colors border border-red-500/30"
+             >
+               <LogOut className="w-4 h-4" /> Đăng xuất
+             </button>
+             <button onClick={onClose} className="text-slate-400 hover:text-white bg-white/10 p-2 rounded-lg transition-colors">
+               <X className="w-5 h-5" />
+             </button>
+           </div>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
@@ -138,66 +155,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
             </h3>
             
             <form onSubmit={handleCreateAccount} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Tên đăng nhập</label>
-                <input 
-                  type="text" 
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm"
-                  placeholder="user..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Mật khẩu</label>
-                <input 
-                  type="text" 
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-sm font-mono"
-                  placeholder="pass..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Vai trò</label>
-                  <select 
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as AccountRole)}
-                    className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm"
-                  >
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Hạn (ngày)</label>
-                  <input 
-                    type="number" 
-                    value={newDays}
-                    onChange={(e) => setNewDays(e.target.value)}
-                    className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm"
-                    placeholder="30"
-                  />
-                </div>
-              </div>
-
-              {formError && <p className="text-red-500 text-xs font-bold">{formError}</p>}
-              {formSuccess && <p className="text-green-600 text-xs font-bold">{formSuccess}</p>}
-
-              <button 
-                type="submit"
-                className="w-full bg-primary-600 text-white font-bold py-3 rounded-xl hover:bg-primary-700 transition-all shadow-md mt-2"
-              >
-                Tạo nhanh
-              </button>
+               {/* Disabled overlay since client-side admin creation is limited in Firebase without Cloud Functions */}
+               <div className="opacity-50 pointer-events-none relative">
+                 <div className="absolute inset-0 z-10"></div>
+                 <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Tên đăng nhập</label>
+                    <input type="text" className="w-full p-3 bg-white border border-slate-200 rounded-xl" disabled />
+                 </div>
+                 {/* ... other fields ... */}
+               </div>
+               
+               <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 text-xs text-amber-800 leading-relaxed">
+                  <strong>Lưu ý quan trọng:</strong> Khi dùng Firebase Client, vui lòng hướng dẫn người dùng tự đăng ký (qua nút "Tạo tài khoản" ở màn hình đăng nhập). Sau đó, bạn sẽ thấy họ xuất hiện ở danh sách bên phải để Duyệt.
+               </div>
             </form>
-            
-            <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-800 leading-relaxed">
-                <strong>Lưu ý:</strong> Người dùng cũng có thể tự đăng ký tài khoản ở màn hình đăng nhập. Tài khoản tự đăng ký sẽ hiển thị ở danh sách bên phải với trạng thái "Chờ duyệt".
-            </div>
           </div>
 
           {/* RIGHT: Account List */}
@@ -206,8 +177,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 <Search className="w-5 h-5 text-slate-400" /> Danh sách ({accounts.length})
               </h3>
-              <button onClick={loadAccounts} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
-                <RefreshCw className="w-4 h-4" />
+              <button onClick={loadAccounts} disabled={isLoading} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               </button>
             </div>
 
@@ -227,7 +198,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                     <tr key={acc.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="p-4 font-bold text-slate-700">
                         {acc.username}
-                        {acc.role === 'admin' && acc.username === 'admin' && <span className="ml-2 text-[10px] bg-slate-200 px-1 rounded text-slate-500">(Gốc)</span>}
+                        <div className="text-[10px] font-normal text-slate-400">{acc.email}</div>
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded text-xs font-bold ${acc.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
@@ -279,7 +250,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                             <span className="text-xs font-bold hidden xl:inline">{!acc.isActive ? 'Duyệt' : 'Gia hạn'}</span>
                          </button>
                          
-                         {/* Lock/Unlock Control */}
+                         {/* Lock/Unlock Control - Protect "admin" username specifically or check logic */}
                          {acc.username !== 'admin' && (
                            <>
                              <button 

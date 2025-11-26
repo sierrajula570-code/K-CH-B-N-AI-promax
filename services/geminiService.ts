@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
@@ -113,7 +114,8 @@ export const generateScript = async (
   duration: DurationOption,
   mode: InputMode,
   perspective: PerspectiveOption,
-  customMinutes?: number
+  customMinutes?: number,
+  persona: 'auto' | 'buffett' | 'munger' = 'auto' // New Param
 ): Promise<string> => {
   
   let ai;
@@ -145,6 +147,18 @@ export const generateScript = async (
     `;
   }
 
+  // HANDLE PERSONA OVERRIDE
+  let personaInstruction = "";
+  if (template.id === 'charlie-munger') {
+     if (persona === 'buffett') {
+       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of WARREN BUFFETT (Optimistic, Folksy, Grandfatherly). DO NOT be Munger.";
+     } else if (persona === 'munger') {
+       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of CHARLIE MUNGER (Blunt, Realistic, Cynical). DO NOT be Buffett.";
+     } else {
+       personaInstruction = "AUTO-DETECT MODE: Analyze the input to decide whether to be Buffett or Munger.";
+     }
+  }
+
   const baseInstruction = `
     *** CRITICAL LANGUAGE FIREWALL ***
     YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
@@ -157,6 +171,8 @@ export const generateScript = async (
     - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
     - CONTEXT: ${perspective.description}
     - INSTRUCTION: Maintain this perspective consistently throughout the entire script.
+
+    ${personaInstruction}
 
     === STRICT TTS FORMATTING ENGINE (NO COMPROMISE) ===
     1. PARAGRAPH STRUCTURE:
