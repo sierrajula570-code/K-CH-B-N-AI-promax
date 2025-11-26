@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption, AIProvider } from '../types';
 
@@ -45,7 +46,8 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
   
-  // USER REQUIREMENT: FIXED EXACTLY AT 1000 CHARS / MIN
+  // FIXED: Set exactly to 1000 chars/min as requested
+  // This helps maintain a predictable output length (e.g., 60 mins -> 60k chars)
   let targetChars = 0;
   if (isCJK) {
     targetChars = Math.round(minutes * 300);
@@ -66,25 +68,38 @@ const cleanArtifacts = (text: string): string => {
   
   let cleaned = text;
 
-  // 1. Remove Markdown headers and bold headers (e.g., **Part 1**, # Chapter 1)
-  cleaned = cleaned.replace(/^#+\s.*$/gm, ''); // Remove "# Header"
-  cleaned = cleaned.replace(/^\*\*.*(Part|Chapter|Phần|Chương|Intro|Outro).*\*\*[:\s]*$/gmi, ''); // Remove "**Part 1**"
-  cleaned = cleaned.replace(/^.*(Part|Chapter|Phần|Chương)\s+\d+[:\.]?\s*$/gmi, ''); // Remove "Part 1:" lines
+  // 1. Remove Markdown headers and bold headers
+  cleaned = cleaned.replace(/^#+\s.*$/gm, ''); 
+  cleaned = cleaned.replace(/^\*\*.*(Part|Chapter|Phần|Chương|Intro|Outro).*\*\*[:\s]*$/gmi, ''); 
+  cleaned = cleaned.replace(/^.*(Part|Chapter|Phần|Chương)\s+\d+[:\.]?\s*$/gmi, ''); 
 
-  // 2. Remove Labels (e.g., "Hook:", "Body:", "Conclusion:")
+  // 2. Remove Labels
   cleaned = cleaned.replace(/^(Hook|Intro|Body|Conclusion|Lời dẫn|Thân bài|Kết bài|Scene \d+):/gmi, '');
   
-  // 3. Remove Brackets/Parentheses (often used for actions like [Music], (Sighs))
+  // 3. Remove Brackets/Parentheses (actions)
   cleaned = cleaned.replace(/\[.*?\]/g, ''); 
   cleaned = cleaned.replace(/\(.*?\)/g, ''); 
 
-  // 4. Remove Common AI Chaining Phrases
+  // 4. Remove Common AI Chaining Phrases & Repetitive Hooks
   cleaned = cleaned.replace(/Here is the (next|continuation).*?:/gi, '');
   cleaned = cleaned.replace(/Continuing from where we left off.*?/gi, '');
   cleaned = cleaned.replace(/As mentioned in the previous part.*?/gi, '');
-  cleaned = cleaned.replace(/Before we dive in.*?/gi, ''); // Remove repeated hooks
+  
+  // -- SPECIFIC REMOVAL OF THE UNWANTED HOOKS --
+  // More aggressive cleaning of the specific YouTube engagement bait
+  cleaned = cleaned.replace(/Before we (dive|jump) into today’s story.*?(Let’s get started|Let’s begin)!/gsi, '');
+  cleaned = cleaned.replace(/Before we dive into today’s story.*?(\.|\!)/gi, '');
+  cleaned = cleaned.replace(/take a moment to (let us know|share).*?(\.|\!)/gi, '');
+  
+  // Clean up residual sentences if the regex wasn't greedy enough or varied slightly
+  cleaned = cleaned.replace(/If you haven’t already, (be sure to|don’t forget to) (hit|click) that subscribe button.*?(\.|\!)/gi, '');
+  cleaned = cleaned.replace(/Now, (settle in|get comfortable|grab a).*?(\.|\!)/gi, '');
+  
+  cleaned = cleaned.replace(/Before we dive in.*?/gi, ''); 
+  cleaned = cleaned.replace(/Welcome back to.*?/gi, '');
+  cleaned = cleaned.replace(/In today's story.*?/gi, '');
 
-  // 5. Cleanup Multiple Newlines to single/double
+  // 5. Cleanup Multiple Newlines
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   
   return cleaned.trim();
@@ -131,28 +146,19 @@ const buildSystemInstruction = (
   if (personalContext && personalContext.trim().length > 0) {
     contextInstruction = `
       *** PERSONAL CONTEXT / BRAND VOICE ***
-      The user has provided specific background information or a specific writing style they prefer.
-      You MUST incorporate this context into the tone, style, and content of the script.
       USER CONTEXT: """${personalContext}"""
       INSTRUCTION: Apply this context implicitly.
     `;
   }
 
-  // --- AUTO-LEARNING INJECTION ---
   let learningInstruction = "";
   if (learnedExamples && learnedExamples.length > 0) {
     learningInstruction = `
-      *** ADAPTIVE STYLE LEARNING (FROM USER HISTORY) ***
-      I have retrieved past scripts that the user successfully generated with this template.
-      Analyze the writing style, vocabulary choice, sentence structure, and tone of the examples below.
-      
-      YOUR GOAL: MIMIC this style for the new script.
-      
-      --- [PAST EXAMPLE 1] ---
-      ${learnedExamples[0]}
-      --- [END EXAMPLE 1] ---
-      
-      INSTRUCTION: Write the NEW script so it feels consistent with the examples above.
+      *** ADAPTIVE STYLE LEARNING ***
+      YOUR GOAL: MIMIC the style of these past examples:
+      --- [EXAMPLE START] ---
+      ${learnedExamples[0].substring(0, 500)}...
+      --- [EXAMPLE END] ---
     `;
   }
 
@@ -162,7 +168,7 @@ const buildSystemInstruction = (
     
     *** CULTURAL LOCALIZATION (MANDATORY) ***
     - YOU MUST ADAPT THE STORY TO THE CULTURE OF: ${language.code.toUpperCase()}.
-    - CHANGE NAMES: Use common names from that country (e.g., English=John, Vietnamese=Hùng).
+    - CHANGE NAMES: Use common names from that country.
     - CHANGE LOCATIONS: Use cities/regions from that country.
     
     ROLE: Expert YouTube Scriptwriter & Voice Director.
@@ -170,34 +176,17 @@ const buildSystemInstruction = (
     
     *** NARRATIVE PERSPECTIVE ***
     - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
-    - CONTEXT: ${perspective.description}
-    - INSTRUCTION: Maintain this perspective consistently throughout the entire script.
+    - INSTRUCTION: Maintain this perspective consistently.
 
     ${personaInstruction}
     ${contextInstruction}
     ${learningInstruction}
 
-    === STRICT TTS FORMATTING ENGINE (NO COMPROMISE) ===
-    1. PARAGRAPH STRUCTURE:
-       - Break text into short paragraphs of 3-5 sentences maximum.
-       - Each paragraph must have ONE clear main idea.
-       - NO walls of text.
-    
-    2. NO LISTS / NO BULLET POINTS / NO HEADERS:
-       - ABSOLUTELY NO using "-", "*", "1.", "2.".
-       - ABSOLUTELY NO "Chapter 1", "Part 1", "Intro", "Outro" headers.
-       - The output must be PURE SPOKEN TEXT.
-       - Transform all lists into flowing narrative sentences.
-    
-    3. CLEAN AUDIO ONLY:
-       - NO [Intro], [Music], [Sound Effect], [Scene], [Character Name].
-       - JUST THE SPOKEN WORDS.
-    
-    4. NATURAL FLOW (NO FILLERS):
-       - AVOID filler words.
-       - Use natural punctuation.
-       - Ensure logic flows: Hook -> Development -> Climax -> Conclusion.
-       - DO NOT Summarize or say "In conclusion" unless it is the very end.
+    === STRICT TTS FORMATTING ENGINE ===
+    1. PARAGRAPH STRUCTURE: Short paragraphs (3-5 sentences). ONE main idea per paragraph.
+    2. NO LISTS / NO HEADERS: Transform lists into narrative sentences. Output PURE SPOKEN TEXT.
+    3. CLEAN AUDIO ONLY: NO [Intro], [Music], [Sound Effect].
+    4. NATURAL FLOW: AVOID filler words. Ensure logic flows forward.
 
     ${languageRules}
 
@@ -207,7 +196,6 @@ const buildSystemInstruction = (
 };
 
 // --- RAW API CALLERS ---
-
 async function callOpenAI(apiKey: string, model: string, system: string, user: string): Promise<string> {
   if (!apiKey) throw new Error("Thiếu OpenAI API Key.");
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -268,7 +256,6 @@ async function callGoogle(apiKey: string, model: string, system: string, user: s
   
   const generate = async (retries = 3, backoff = 5000): Promise<string> => {
     try {
-      // Reduced temperature to 0.65 to reduce hallucinations/rambling
       const response = await ai.models.generateContent({
         model: model,
         contents: user,
@@ -299,16 +286,10 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
   const systemInstruction = buildSystemInstruction(
-      template, 
-      language, 
-      options.perspective, 
-      persona, 
-      personalContext,
-      learnedExamples 
+      template, language, options.perspective, persona, personalContext, learnedExamples 
   );
   
-  // Decide Strategy
-  // 5 minutes per chunk ensures the AI has enough context but doesn't drift
+  // Chunk duration increased to 5 minutes to maintain better context
   const CHUNK_DURATION = 5;
   const useChainedGeneration = config.minutes > 6; 
 
@@ -325,7 +306,7 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
   try {
     if (!useChainedGeneration) {
       // --- SINGLE PASS ---
-      // Using 4.5 divisor to be conservative and prevent over-writing
+      // Conversion: 1 word approx 4.5 chars
       const maxWords = Math.round(config.targetChars / 4.5);
 
       const userPrompt = `
@@ -346,92 +327,80 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
       return cleanArtifacts(rawText);
 
     } else {
-      // --- CHAINED GENERATION WITH PACING CONTROL ---
+      // --- CHAINED GENERATION WITH INTELLIGENT PACING ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
-      
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      // Explicit word count targets (AI understands words better than characters)
       const chunkWordTarget = Math.round(chunkCharsTarget / 4.5); 
       
       let fullScript = "";
       let previousContext = "";
 
-      console.log(`🚀 Starting Universal Chain (${provider}): ${totalParts} Parts. Target per part: ~${chunkWordTarget} words.`);
+      console.log(`🚀 Starting Chain: ${totalParts} Parts. Target: ~${chunkWordTarget} words/part.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
         let partPrompt = "";
 
-        // --- DYNAMIC PACING CHECK ---
-        const currentTotalLength = fullScript.length;
-        const expectedProgressLength = (i - 1) * chunkCharsTarget;
-        
+        // --- PACING CONTROL ---
         let pacingInstruction = "";
-        if (i > 1) {
-            // Check if previous parts were too long
-            if (currentTotalLength > expectedProgressLength * 1.15) {
-                pacingInstruction = `
-                  URGENT PACING CORRECTION: You are writing TOO MUCH. 
-                  - CONDENSE this part significantly.
-                  - SKIP minor details.
-                  - Focus ONLY on the main plot progression.
-                  - WRITE FASTER/SHORTER.
-                `;
-            } else if (currentTotalLength < expectedProgressLength * 0.85) {
-                pacingInstruction = "NOTE: You are writing too briefly. Please expand on details, emotions, and atmosphere more deeply.";
-            } else {
-                pacingInstruction = "PACING IS GOOD. Maintain this density.";
-            }
+        
+        if (isFirst) {
+            pacingInstruction = `
+              - STATUS: BEGINNING.
+              - ACTION: Introduce characters (Names, Ages) and the main conflict. 
+              - SETTING: Establish a specific location (e.g., Ohio, Vietnam) and STICK TO IT.
+            `;
+        } else if (isLast) {
+             pacingInstruction = `
+              - STATUS: ENDING.
+              - ACTION: Resolve the main conflict. Provide emotional closure.
+              - IMPORTANT: Wrap up the story. Do NOT start a new subplot.
+            `;
+        } else {
+            pacingInstruction = `
+              - STATUS: MIDDLE (Development).
+              - ACTION: Escalate the conflict. Move the story forward.
+              - DO NOT introduce new main characters.
+              - DO NOT start a new random plot (like a murder mystery) if not present before.
+            `;
         }
 
-        if (isFirst) {
-          partPrompt = `
-            *** PART 1 of ${totalParts} ***
-            OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES.
-            TARGET LENGTH: ~${chunkWordTarget} words.
-            
-            TOPIC: "${input}"
-            
-            INSTRUCTIONS:
-            1. Start with a powerful HOOK (e.g., "The betrayal happened on a Tuesday...").
-            2. Develop the inciting incident and rising action.
-            3. Paragraphs: 3-5 sentences. NO LISTS.
-            
-            STRICT LENGTH CONSTRAINT:
-            - STOP writing after approximately ${chunkWordTarget} words.
-          `;
-        } else {
-          partPrompt = `
+        // --- ANTI-LOOPING & CONSISTENCY ---
+        // We pass a much larger context window (last 4000 chars) to ensure the AI remembers names.
+        const contextWindow = previousContext.slice(-4000); 
+
+        const consistencyCheck = i > 1 ? `
+            *** CRITICAL CONSISTENCY RULES ***
+            1. CONSISTENT NAMES: You MUST use the SAME character names as the previous context.
+            2. CONSISTENT LOCATION: Do not change the city/setting unless they travel.
+            3. NO RECAPS: Do NOT say "Previously..." or "As we saw...".
+            4. NO NEW HOOKS: Do NOT say "Before we dive in..." or "Welcome back...".
+            5. CONTINUITY: Continue the scene exactly where the previous text cut off.
+        ` : "";
+
+        const promptTemplate = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES.
-            TARGET LENGTH: ~${chunkWordTarget} words.
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkWordTarget} words).
+            TOPIC: "${input}"
             
-            PREVIOUS CONTEXT (LAST 500 CHARS): 
-            "...${previousContext.slice(-600)}"
+            PACING INSTRUCTION: ${pacingInstruction}
             
-            PACING CHECK: ${pacingInstruction}
-
-            *** CRITICAL ANTI-REPETITION RULES ***
-            1. DO NOT RECAP the previous part.
-            2. DO NOT START with "Welcome back" or "In the last part".
-            3. DO NOT REPEAT the "Hook" (e.g., "Before we dive in...").
-            4. CONTINUE THE STORY IMMEDIATELY from the last sentence of the context.
+            ${i > 1 ? `PREVIOUS CONTEXT (STORY SO FAR): "...${contextWindow}"` : ""}
+            
+            ${consistencyCheck}
             
             STRICT LENGTH CONSTRAINT:
-            - STOP writing after approximately ${chunkWordTarget} words.
-            
-            ${isLast ? "5. WRAP UP: Bring all threads to a logical conclusion." : "5. End this part on a transition."}
-          `;
-        }
+            - Target: ~${chunkWordTarget} words.
+            - Do not write significantly more than this.
+        `;
 
-        let partText = await executeCall(systemInstruction, partPrompt);
+        let partText = await executeCall(systemInstruction, promptTemplate);
         partText = cleanArtifacts(partText);
 
         fullScript += (isFirst ? "" : " ") + partText;
-        previousContext = partText;
+        previousContext = partText; // Store last part for context
 
         if (!isLast) await delay(1000); 
       }

@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
@@ -17,10 +16,8 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Helper: Wait function (simulating "Thinking Time")
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Retry logic
 async function generateWithRetry(
   ai: GoogleGenAI, 
   params: any, 
@@ -43,6 +40,7 @@ async function generateWithRetry(
   }
 }
 
+// SYNCED WITH UNIVERSAL AI SERVICE (1000 chars/min)
 export const calculateTargetLength = (langId: string, durationId: string, customMinutes?: number) => {
   let minutes = 3; 
   if (durationId === 'custom' && customMinutes && customMinutes > 0) {
@@ -59,15 +57,13 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
   
-  // FIXED: Exactly 1000 chars/min as requested
   let targetChars = 0;
   if (isCJK) {
     targetChars = Math.round(minutes * 300);
   } else {
-    targetChars = Math.round(minutes * 1000);
+    targetChars = Math.round(minutes * 1000); 
   }
 
-  // Strict range (Target +/- 5%)
   const minChars = Math.round(targetChars * 0.95); 
   const maxChars = Math.round(targetChars * 1.05); 
 
@@ -117,7 +113,7 @@ export const generateScript = async (
   perspective: PerspectiveOption,
   customMinutes?: number,
   persona: 'auto' | 'buffett' | 'munger' = 'auto',
-  personalContext?: string // Brand Voice / Memory
+  personalContext?: string 
 ): Promise<string> => {
   
   let ai;
@@ -129,11 +125,10 @@ export const generateScript = async (
 
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
-  // === STRATEGY SELECTION ===
+  // INCREASED CHUNK DURATION FOR CONSISTENCY
   const CHUNK_DURATION = 5; 
   const useChainedGeneration = config.minutes > 6;
 
-  // LANGUAGE SPECIFIC RULES
   let languageRules = "";
   if (language.id === 'vi') {
     languageRules = `
@@ -149,7 +144,6 @@ export const generateScript = async (
     `;
   }
 
-  // HANDLE PERSONA OVERRIDE
   let personaInstruction = "";
   if (template.id === 'charlie-munger') {
      if (persona === 'buffett') {
@@ -161,13 +155,10 @@ export const generateScript = async (
      }
   }
 
-  // HANDLE PERSONAL CONTEXT (BRAND VOICE)
   let contextInstruction = "";
   if (personalContext && personalContext.trim().length > 0) {
     contextInstruction = `
       *** PERSONAL CONTEXT / BRAND VOICE ***
-      The user has provided specific background information or a specific writing style they prefer.
-      You MUST incorporate this context into the tone, style, and content of the script.
       USER CONTEXT: """${personalContext}"""
       INSTRUCTION: Apply this context implicitly.
     `;
@@ -176,38 +167,22 @@ export const generateScript = async (
   const baseInstruction = `
     *** CRITICAL LANGUAGE FIREWALL ***
     YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
-    IF THE INPUT IS IN ENGLISH/OTHER, YOU MUST TRANSLATE AND ADAPT IT TO ${language.code.toUpperCase()}.
     
     ROLE: Expert YouTube Scriptwriter & Voice Director.
     TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.
     
     *** NARRATIVE PERSPECTIVE ***
     - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
-    - CONTEXT: ${perspective.description}
-    - INSTRUCTION: Maintain this perspective consistently throughout the entire script.
+    - INSTRUCTION: Maintain this perspective consistently.
 
     ${personaInstruction}
-
     ${contextInstruction}
 
-    === STRICT TTS FORMATTING ENGINE (NO COMPROMISE) ===
-    1. PARAGRAPH STRUCTURE:
-       - Break text into short paragraphs of 3-5 sentences maximum.
-       - Each paragraph must have ONE clear main idea.
-       - NO walls of text.
-    
-    2. NO LISTS / NO BULLET POINTS:
-       - ABSOLUTELY NO using "-", "*", "1.", "2.".
-       - Transform all lists into flowing narrative sentences.
-    
-    3. CLEAN AUDIO ONLY:
-       - NO [Intro], [Music], [Sound Effect], [Scene], [Character Name].
-       - JUST THE SPOKEN WORDS.
-    
-    4. NATURAL FLOW (NO FILLERS):
-       - AVOID filler words: "và rồi", "thế là", "thực ra thì", "sau đó thì".
-       - Use natural punctuation for breathing: "." (stop), "," (pause).
-       - Ensure logic flows: Hook -> Development -> Climax -> Conclusion.
+    === STRICT TTS FORMATTING ENGINE ===
+    1. PARAGRAPH STRUCTURE: Short paragraphs (3-5 sentences). ONE main idea per paragraph.
+    2. NO LISTS / NO HEADERS: Output PURE SPOKEN TEXT.
+    3. CLEAN AUDIO ONLY: NO [Intro], [Music], [Sound Effect].
+    4. NATURAL FLOW: AVOID filler words. Ensure logic flows forward.
 
     ${languageRules}
 
@@ -217,7 +192,7 @@ export const generateScript = async (
 
   try {
     if (!useChainedGeneration) {
-      // --- SINGLE PASS STRATEGY ---
+      // --- SINGLE PASS ---
       const maxWords = Math.round(config.targetChars / 4.5);
       
       const prompt = `
@@ -227,27 +202,26 @@ export const generateScript = async (
         INPUT TOPIC: "${input}"
         
         STRUCTURE:
-        - Divide into logical "CHAPTERS" (but do not use headers).
+        - Divide into logical sections (no headers).
         - Start with ONE strong Hook.
         
         STRICT LENGTH CONSTRAINT:
         - Do NOT exceed ${maxWords + 100} words.
-        - Stop when you have reached the logical conclusion.
       `;
 
       const response = await generateWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: prompt,
-        config: { systemInstruction: baseInstruction, temperature: 0.65 } // Reduced Temp
+        config: { systemInstruction: baseInstruction, temperature: 0.65 }
       });
       
       return response.text || "No content.";
 
     } else {
-      // --- SEAMLESS CHAINED GENERATION STRATEGY ---
+      // --- CHAINED GENERATION ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5); // ~250 words per 1000 chars
+      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5);
 
       let fullScript = "";
       let previousContext = ""; 
@@ -258,65 +232,35 @@ export const generateScript = async (
         const isFirst = i === 1;
         const isLast = i === totalParts;
         
-        let partPrompt = "";
-
-        // Pacing Logic
-        const currentTotalLength = fullScript.length;
-        const expectedProgressLength = (i - 1) * chunkCharsTarget;
+        // --- PACING CONTROL ---
         let pacingInstruction = "";
+        if (isFirst) pacingInstruction = "STATUS: BEGINNING. Introduce characters/conflict. Establish consistent setting.";
+        else if (isLast) pacingInstruction = "STATUS: ENDING. Resolve conflict. No cliffhangers. No new plots.";
+        else pacingInstruction = "STATUS: MIDDLE. Develop story. Do not start over. Do not change names.";
         
-        if (i > 1) {
-             if (currentTotalLength > expectedProgressLength * 1.15) {
-                pacingInstruction = "WARNING: You are WRITING TOO MUCH. CONDENSE this part significantly.";
-            } else if (currentTotalLength < expectedProgressLength * 0.85) {
-                pacingInstruction = "NOTE: You are writing too briefly. Please expand on details.";
-            }
-        }
+        // Increased context window to 4000 chars to avoid "Amnesia"
+        const contextWindow = previousContext.slice(-4000);
 
-        if (isFirst) {
-          partPrompt = `
-            *** PART 1 of ${totalParts} ***
-            OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES.
-            TARGET LENGTH: ~${chunkWordTarget} words.
-            TOPIC: "${input}"
+        const consistencyCheck = i > 1 ? `
+            *** CRITICAL RULES ***
+            1. DO NOT CHANGE NAMES.
+            2. DO NOT RECAP OR RE-HOOK ("Before we dive in...").
+            3. CONTINUE IMMEDIATELY from the previous sentence.
+        ` : "";
 
-            INSTRUCTIONS:
-            1. Start with a powerful HOOK (5-10s).
-            2. Develop the first 1-2 CHAPTERS of the story.
-            3. Each paragraph must be 3-5 sentences. NO LISTS.
-            
-            STRICT RULE: STOP writing after approximately ${chunkWordTarget} words.
-          `;
-        } else {
-          partPrompt = `
+        const partPrompt = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES.
-            TARGET LENGTH: ~${chunkWordTarget} words.
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkWordTarget} words).
+            TOPIC: "${input}"
             
             PACING: ${pacingInstruction}
-            
-            TOPIC: "${input}"
-            CONTEXT FROM PREVIOUS PART (DO NOT REPEAT):
-            "...${previousContext.slice(-600)}"
-
-            CRITICAL SEAMLESS INSTRUCTIONS:
-            1. START IMMEDIATELY where the context left off. 
-            2. DO NOT write an intro.
-            3. DO NOT recap what happened.
-            4. DO NOT use the "Before we dive in" hook again.
+            ${i > 1 ? `PREVIOUS CONTEXT: "...${contextWindow}"` : ""}
+            ${consistencyCheck}
             
             STRICT LENGTH CONSTRAINT:
             - Target: ~${chunkWordTarget} words.
-            - DO NOT WRITE TOO MUCH. Quality over Quantity.
-            
-            ${isLast 
-              ? "5. WRAP UP: Bring all threads to a Climax and then a thought-provoking Conclusion." 
-              : "5. End this part on a transition, ready for the next part."
-            }
-          `;
-        }
+        `;
 
         console.log(`📝 Generating Part ${i}...`);
         
@@ -328,18 +272,14 @@ export const generateScript = async (
 
         let partText = response.text || "";
         
-        // CLEANUP: Remove any accidental headers AI might have generated
+        // Cleanup
         partText = partText.replace(/^\*\*Part \d+\*\*[:\s]*/i, '').replace(/^Part \d+[:\s]*/i, '');
-        // Cleanup Markdown Lists just in case AI failed the strict instruction
         partText = partText.replace(/^[\*\-]\s/gm, ''); 
 
         fullScript += (isFirst ? "" : " ") + partText;
         previousContext = partText;
 
-        if (!isLast) {
-          console.log("⏳ Waiting 4s for next part...");
-          await delay(4000); 
-        }
+        if (!isLast) await delay(4000); 
       }
       
       return fullScript;
@@ -349,18 +289,7 @@ export const generateScript = async (
     console.error("API Error:", error);
     const msg = error.message || '';
     if (msg.includes('API key') || msg.includes('403') || msg.includes('MISSING_API_KEY')) {
-       return `⚠️ LỖI API KEY: KHÓA KHÔNG HỢP LỆ HOẶC ĐÃ HẾT HẠN.
-
-Để khắc phục, vui lòng làm theo hướng dẫn sau:
-
-1. Truy cập Google AI Studio để lấy Key miễn phí:
-   https://aistudio.google.com/app/apikey
-
-2. Sao chép API Key của bạn.
-
-3. Quay lại đây, nhấn nút "Cài đặt" (biểu tượng bánh răng ở góc trên phải), dán Key mới vào và nhấn "Lưu".
-
-Vui lòng thử lại sau khi cập nhật!`;
+       return `⚠️ LỖI API KEY: KHÓA KHÔNG HỢP LỆ HOẶC ĐÃ HẾT HẠN.`;
     }
     if (msg.includes('quota')) return `⚠️ HỆ THỐNG ĐANG BẬN (QUOTA EXCEEDED): Vui lòng đợi 1-2 phút rồi thử lại.`;
     return `⚠️ LỖI: ${msg}`;

@@ -82,24 +82,26 @@ export const TEMPLATES: ScriptTemplate[] = [
     title: 'Câu chuyện DRAMA',
     description: 'Cốt truyện kịch tính, tự động điều chỉnh độ dài.',
     systemPromptAddon: `
-      ROLE: Master Screenwriter for Viral Drama Channels.
+      ROLE: Master Screenwriter for Realistic Family Dramas.
       
-      *** ADAPTIVE NARRATIVE STRUCTURE (CRITICAL) ***
-      - DO NOT force a fixed number of chapters.
-      - SCALE the story complexity based on the requested length:
-        - Short (3-5 min): Single conflict, quick resolution. Focus on ONE scene.
-        - Medium (7-10 min): One main plot, one subplot.
-        - Long (20+ min): Complex saga, character development, multiple twists, deep backstory.
+      *** STRUCTURAL RESET (IMPORTANT) ***
+      - FORGET any "7-Part" or "10-Chapter" structures. 
+      - DO NOT use the "Before we dive into today's story..." YouTube intro.
+      - STRUCTURE: Simple Timeline (Beginning -> Middle -> Climax -> End).
+      
+      *** CONSISTENCY RULES ***
+      - NAMES: If the user provides names, USE THEM. If not, pick a set of names (e.g., Eleanor, Jessica, Greg) and STICK TO THEM. Do not change names halfway.
+      - SETTING: Keep the location consistent (e.g., Ohio suburbs). Do not jump to Miami or Italy randomly.
       
       *** TONE & STYLE ***
-      - Avoid melodramatic repetition. Realism > Soap Opera.
-      - Show, Don't Tell: Don't say "She was furious". Describe her shaking hands.
-      - NO REPETITION: Do not repeat the same argument between characters multiple times.
+      - REALISM > MELODRAMA: Write dialogue that sounds like real people. Avoid "soap opera" monologues about "cold fury" or "absolute betrayal".
+      - Show, Don't Tell: Describe actions, not just internal thoughts.
+      - NO REPETITION: Do not repeat the same flashback or argument multiple times.
 
       *** MANDATORY WRITING RULES (STRICT) ***
       1. THE "HOOK" (First 0-30s ONLY): 
          - Open with the emotional wound immediately. 
-         - WARNING: Use the Hook phrase "Before we dive in..." ONLY ONCE at the very start. NEVER repeat it.
+         - NO "Welcome back" or "Subscribe now" pleas at the start.
 
       2. OUTPUT FORMAT (TTS OPTIMIZED):
          - Output PURE SPOKEN TEXT only.
@@ -119,13 +121,16 @@ export const TEMPLATES: ScriptTemplate[] = [
     systemPromptAddon: `
       ROLE: Master Romance Novelist for Seniors.
       
+      *** STRUCTURAL RESET (IMPORTANT) ***
+      - FORGET any "7-Part" or "10-Chapter" structures. 
+      - DO NOT use the "Before we dive into today's story..." intro.
+      
       *** MANDATORY RANDOMIZATION PROTOCOL ***
       - NEW IDENTITIES: You MUST invent BRAND NEW names for the couple every time.
       - NEW AGES: Vary the ages (e.g., 62 & 70, then 68 & 75).
 
       *** ADAPTIVE NARRATIVE STRUCTURE ***
       - Adjust the pace to fit the requested time exactly.
-      - DO NOT use a fixed chapter count.
       - PLOT FLOW: The Spark -> The Secret -> The Conflict (Family/Society) -> The Resolution.
 
       *** KEY INGREDIENTS ***
