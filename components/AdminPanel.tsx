@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   Users, X, UserPlus, Search, RefreshCw, 
   Lock, Unlock, Clock, Shield, CheckCircle, 
   CalendarDays, Trash2, LogOut, ChevronLeft, 
-  ChevronRight, Mail, Crown, MoreHorizontal, ArrowRight
+  ChevronRight, Mail, Crown, MoreHorizontal, ArrowRight,
+  Database, CloudUpload
 } from 'lucide-react';
 import { 
   getAccounts, 
@@ -16,6 +18,7 @@ import {
   Account, 
   AccountRole 
 } from '../services/accountService';
+import { seedDatabase } from '../services/configService';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -26,6 +29,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
   
   // New Account Form State
   const [newUsername, setNewUsername] = useState('');
@@ -64,6 +68,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     const sorted = data.sort((a, b) => b.createdAt - a.createdAt);
     setAccounts(sorted);
     setIsLoading(false);
+  };
+
+  const handleSeedData = async () => {
+    if(confirm("Hành động này sẽ ghi đè dữ liệu Templates, Languages, v.v. mặc định lên Cloud Firestore. Bạn có chắc chắn không?")) {
+        setIsSeeding(true);
+        const success = await seedDatabase(true);
+        setIsSeeding(false);
+        if(success) {
+            alert("Đã đồng bộ Dữ liệu Kiến thức lên Cloud thành công! Hãy tải lại App.");
+        } else {
+            alert("Lỗi khi đồng bộ dữ liệu.");
+        }
+    }
   };
 
   const setDurationPreset = (days: number) => {
@@ -193,6 +210,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
            </div>
            
            <div className="flex items-center gap-3">
+             <button
+               onClick={handleSeedData}
+               disabled={isSeeding}
+               className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-400 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-500/20"
+             >
+                {isSeeding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+                <span className="hidden sm:inline">Đồng bộ Kiến thức lên Mây</span>
+             </button>
+
              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
                 <Users className="w-4 h-4 text-slate-400" />
                 <span className="text-xs text-slate-300 font-bold">{accounts.length} Tài khoản</span>

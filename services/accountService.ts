@@ -1,5 +1,6 @@
+
 import { auth, db } from './firebase';
-import { initializeApp, getApp, deleteApp, FirebaseApp, getApps } from "firebase/app";
+import { initializeApp, deleteApp, FirebaseApp } from "firebase/app";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -26,6 +27,8 @@ export interface Account {
   expiresAt: number | null; 
   createdAt: number;
   isActive: boolean;
+  personalContext?: string; // Dữ liệu ngữ cảnh chung (Global)
+  templateContexts?: Record<string, string>; // Dữ liệu ngữ cảnh riêng cho từng Template ID
 }
 
 const USERS_COLLECTION = 'users';
@@ -78,7 +81,9 @@ export const signup = async (username: string, password: string): Promise<{ ok: 
       role: 'user',
       expiresAt: null, 
       createdAt: Date.now(),
-      isActive: false // Mặc định chờ duyệt
+      isActive: false, // Mặc định chờ duyệt
+      personalContext: '',
+      templateContexts: {}
     };
 
     // Lưu thông tin bổ sung vào Firestore
@@ -100,34 +105,27 @@ export const createAccountByAdmin = async (
   emailInput: string | null,
   password: string, 
   role: AccountRole, 
-  daysValid: number | null // Nếu null hoặc 0 thì xem như Vĩnh viễn (hoặc xử lý riêng)
+  daysValid: number | null 
 ): Promise<{ ok: boolean; error?: string; account?: Account }> => {
   
   // STRATEGY: Secondary App Instance
-  // Tạo một instance phụ để auth không bị conflict với admin đang login
   let secondaryApp: FirebaseApp | undefined;
 
   try {
-    // Lấy config từ app chính đang chạy
     const currentApp = auth.app; 
     const config = currentApp.options;
     
-    // Dùng tên unique để tránh lỗi "App already exists"
     const appName = `SecondaryApp-${Date.now()}`;
     secondaryApp = initializeApp(config, appName);
     const secondaryAuth = getAuth(secondaryApp);
 
-    // Xác định email
     const email = emailInput && emailInput.trim() !== '' 
       ? emailInput 
       : `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
 
-    // 1. Tạo user trên Authentication (dùng secondary app)
     const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
     const user = userCredential.user;
 
-    // Tính toán ngày hết hạn
-    // Nếu daysValid = -1 hoặc null -> Vĩnh viễn (null)
     let expiresAt = null;
     if (daysValid && daysValid > 0) {
       expiresAt = Date.now() + (daysValid * 24 * 60 * 60 * 1000);
@@ -140,13 +138,12 @@ export const createAccountByAdmin = async (
       role: role,
       expiresAt: expiresAt,
       createdAt: Date.now(),
-      isActive: true // Admin tạo thì active luôn
+      isActive: true, // Admin tạo thì active luôn
+      personalContext: '',
+      templateContexts: {}
     };
 
-    // 2. Lưu vào Firestore (dùng DB chính, vì Admin đang có quyền write)
     await setDoc(doc(db, USERS_COLLECTION, user.uid), newAccount);
-
-    // 3. Đăng xuất khỏi secondary app ngay lập tức (good practice)
     await signOut(secondaryAuth);
 
     return { ok: true, account: newAccount };
@@ -158,7 +155,6 @@ export const createAccountByAdmin = async (
     if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu.';
     return { ok: false, error: msg };
   } finally {
-    // 4. Cleanup: Luôn luôn xóa app phụ dù thành công hay thất bại
     if (secondaryApp) {
       try { await deleteApp(secondaryApp); } catch(e) { console.error("Cleanup error", e); }
     }
@@ -167,17 +163,14 @@ export const createAccountByAdmin = async (
 
 export const authenticate = async (username: string, password: string): Promise<{ ok: boolean; account?: Account; error?: string }> => {
   try {
-    // Kiểm tra xem input là email hay username
     let email = username;
     if (!username.includes('@')) {
         email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
     }
     
-    // 1. Sign in Auth
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    // 2. Get Firestore Profile
     const account = await getUserProfile(user.uid);
 
     if (!account) {
@@ -185,13 +178,11 @@ export const authenticate = async (username: string, password: string): Promise<
       return { ok: false, error: 'Không tìm thấy thông tin hồ sơ người dùng.' };
     }
 
-    // 3. Check Active & Expiry
     if (!account.isActive) {
       await signOut(auth);
       return { ok: false, error: 'Tài khoản chưa được kích hoạt hoặc bị khóa.' };
     }
 
-    // Logic Expiry: Nếu expiresAt là null => Vĩnh viễn. Nếu có số => Check ngày.
     if (account.expiresAt !== null && Date.now() > account.expiresAt) {
       await signOut(auth);
       return { ok: false, error: 'Tài khoản đã hết hạn sử dụng.' };
@@ -218,7 +209,6 @@ export const extendAccount = async (id: string, days: number): Promise<boolean> 
     const account = await getUserProfile(id);
     if (!account) return false;
 
-    // Nếu days = -1 => Set thành Vĩnh viễn (null)
     if (days === -1) {
         await updateDoc(doc(db, USERS_COLLECTION, id), {
             expiresAt: null,
@@ -227,7 +217,6 @@ export const extendAccount = async (id: string, days: number): Promise<boolean> 
         return true;
     }
 
-    // Nếu tài khoản đã hết hạn, tính từ hiện tại. Nếu chưa, cộng dồn.
     const baseTime = (account.expiresAt && account.expiresAt > Date.now()) ? account.expiresAt : Date.now();
     const newExpiry = baseTime + (days * 24 * 60 * 60 * 1000);
 
@@ -247,7 +236,6 @@ export const toggleAccountActive = async (id: string): Promise<boolean> => {
     const account = await getUserProfile(id);
     if (!account) return false;
     
-    // Không khoá admin gốc
     if (account.role === 'admin' && account.username === 'admin') return false;
 
     await updateDoc(doc(db, USERS_COLLECTION, id), {
@@ -273,9 +261,6 @@ export const updateUserRole = async (id: string, role: AccountRole): Promise<boo
 
 export const deleteAccount = async (id: string): Promise<boolean> => {
   try {
-    // Chỉ xoá document trong Firestore.
-    // Lưu ý: User Auth vẫn tồn tại (cần Firebase Cloud Functions để xóa triệt để).
-    // Nhưng xóa Firestore doc là đủ để chặn đăng nhập.
     await deleteDoc(doc(db, USERS_COLLECTION, id));
     return true;
   } catch (e) {
@@ -283,13 +268,12 @@ export const deleteAccount = async (id: string): Promise<boolean> => {
   }
 };
 
-// Upgrade current user to Admin (Used for self-claim)
 export const upgradeToAdmin = async (uid: string): Promise<boolean> => {
   try {
     await updateDoc(doc(db, USERS_COLLECTION, uid), {
       role: 'admin',
       isActive: true,
-      expiresAt: null // Admin thường là vĩnh viễn
+      expiresAt: null 
     });
     return true;
   } catch (e) {
@@ -298,6 +282,32 @@ export const upgradeToAdmin = async (uid: string): Promise<boolean> => {
   }
 };
 
-export const initializeDefaultAdmin = async () => {
-    // No-op
+// --- Update Personal Context (Brand Voice) ---
+
+// 1. Cập nhật ngữ cảnh chung
+export const updatePersonalContext = async (uid: string, context: string): Promise<boolean> => {
+  try {
+    await updateDoc(doc(db, USERS_COLLECTION, uid), {
+      personalContext: context
+    });
+    return true;
+  } catch (e) {
+    console.error("Update Context Error:", e);
+    return false;
+  }
+};
+
+// 2. Cập nhật ngữ cảnh riêng cho từng Template
+export const updateTemplateContext = async (uid: string, templateId: string, context: string): Promise<boolean> => {
+  try {
+    // Firestore update nested fields using dot notation: "templateContexts.templateId"
+    const fieldPath = `templateContexts.${templateId}`;
+    await updateDoc(doc(db, USERS_COLLECTION, uid), {
+      [fieldPath]: context
+    });
+    return true;
+  } catch (e) {
+    console.error("Update Template Context Error:", e);
+    return false;
+  }
 };

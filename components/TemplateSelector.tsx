@@ -1,15 +1,16 @@
+
 import React from 'react';
 import { ScriptTemplate } from '../types';
-import { TEMPLATES } from '../constants';
 import { IconWrapper } from './IconWrapper';
 import { LayoutGrid } from 'lucide-react';
 
 interface Props {
+  templates: ScriptTemplate[];
   selectedTemplateId: string;
   onSelect: (template: ScriptTemplate) => void;
 }
 
-const TemplateSelector: React.FC<Props> = ({ selectedTemplateId, onSelect }) => {
+const TemplateSelector: React.FC<Props> = ({ templates, selectedTemplateId, onSelect }) => {
   return (
     <div className="mb-10">
       <div className="flex items-center gap-3 mb-5">
@@ -20,7 +21,7 @@ const TemplateSelector: React.FC<Props> = ({ selectedTemplateId, onSelect }) => 
       </div>
       
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {TEMPLATES.map((template) => (
+        {templates.map((template) => (
           <button
             key={template.id}
             onClick={() => onSelect(template)}

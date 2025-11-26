@@ -115,7 +115,8 @@ export const generateScript = async (
   mode: InputMode,
   perspective: PerspectiveOption,
   customMinutes?: number,
-  persona: 'auto' | 'buffett' | 'munger' = 'auto' // New Param
+  persona: 'auto' | 'buffett' | 'munger' = 'auto',
+  personalContext?: string // Brand Voice / Memory
 ): Promise<string> => {
   
   let ai;
@@ -159,6 +160,23 @@ export const generateScript = async (
      }
   }
 
+  // HANDLE PERSONAL CONTEXT (BRAND VOICE)
+  let contextInstruction = "";
+  if (personalContext && personalContext.trim().length > 0) {
+    contextInstruction = `
+      *** PERSONAL CONTEXT / BRAND VOICE ***
+      The user has provided specific background information or a specific writing style they prefer.
+      You MUST incorporate this context into the tone, style, and content of the script.
+      
+      USER CONTEXT:
+      """
+      ${personalContext}
+      """
+      
+      INSTRUCTION: Apply this context implicitly. Do not mention "The user said...". Just write in this voice/context.
+    `;
+  }
+
   const baseInstruction = `
     *** CRITICAL LANGUAGE FIREWALL ***
     YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
@@ -173,6 +191,8 @@ export const generateScript = async (
     - INSTRUCTION: Maintain this perspective consistently throughout the entire script.
 
     ${personaInstruction}
+
+    ${contextInstruction}
 
     === STRICT TTS FORMATTING ENGINE (NO COMPROMISE) ===
     1. PARAGRAPH STRUCTURE:

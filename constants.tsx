@@ -1,5 +1,78 @@
 
-import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption } from './types';
+import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, AIModel } from './types';
+
+export const AI_MODELS: AIModel[] = [
+  // GOOGLE
+  { 
+    id: 'gemini-2.5-flash', 
+    name: 'Gemini 2.5 Flash', 
+    provider: 'google', 
+    description: 'Nhanh, thông minh, miễn phí',
+    isPremium: false 
+  },
+  { 
+    id: 'gemini-2.5-pro', 
+    name: 'Gemini 2.5 Pro', 
+    provider: 'google', 
+    description: 'Tư duy logic cao, bộ nhớ lớn, mạnh mẽ nhất',
+    isPremium: true 
+  },
+
+  // OPENAI
+  { 
+    id: 'gpt-5.1', 
+    name: 'GPT-5.1 (Preview)', 
+    provider: 'openai', 
+    description: 'Phiên bản mới nhất (Sớm)',
+    isPremium: true 
+  },
+  { 
+    id: 'gpt-5-pro', 
+    name: 'GPT-5 Pro', 
+    provider: 'openai', 
+    description: 'Mạnh mẽ nhất hệ mặt trời',
+    isPremium: true 
+  },
+  { 
+    id: 'gpt-4o', 
+    name: 'GPT-4o', 
+    provider: 'openai', 
+    description: 'Đa phương thức, nhanh & chuẩn',
+    isPremium: true 
+  },
+
+  // ANTHROPIC
+  { 
+    id: 'claude-sonnet-4-5', 
+    name: 'Claude Sonnet 4.5', 
+    provider: 'anthropic', 
+    description: 'Văn phong tự nhiên nhất',
+    isPremium: true 
+  },
+  { 
+    id: 'claude-3-5-sonnet-latest', 
+    name: 'Claude 3.5 Sonnet', 
+    provider: 'anthropic', 
+    description: 'Cân bằng tốt nhất hiện tại',
+    isPremium: true 
+  },
+
+  // XAI (GROK)
+  { 
+    id: 'grok-4', 
+    name: 'Grok 4', 
+    provider: 'xai', 
+    description: 'Thông minh, hài hước, cập nhật',
+    isPremium: true 
+  },
+  { 
+    id: 'grok-2-latest', 
+    name: 'Grok 2', 
+    provider: 'xai', 
+    description: 'Ổn định, truy cập X.com',
+    isPremium: false 
+  }
+];
 
 export const TEMPLATES: ScriptTemplate[] = [
   {

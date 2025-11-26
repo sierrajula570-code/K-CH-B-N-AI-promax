@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { TEMPLATES, LANGUAGES, DURATIONS, PERSPECTIVES } from './constants';
-import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem } from './types';
+import { TEMPLATES, LANGUAGES, DURATIONS, PERSPECTIVES, AI_MODELS } from './constants'; 
+import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem, AIProvider } from './types';
 import Header from './components/Header';
 import InputSection from './components/InputSection';
 import TemplateSelector from './components/TemplateSelector';
@@ -14,13 +14,22 @@ import LoginModal from './components/LoginModal';
 import SignupModal from './components/SignupModal';
 import FirebaseConfigModal from './components/FirebaseConfigModal'; 
 import AdminAuthModal from './components/AdminAuthModal';
-import { generateScript, calculateTargetLength } from './services/geminiService';
+import { universalGenerateScript, calculateTargetLength } from './services/universalAiService';
 import { 
   getUserProfile,
   Account,
   logout,
   upgradeToAdmin
 } from './services/accountService';
+import { 
+  getHistory, 
+  saveHistoryItem as saveToFirestore, 
+  deleteHistoryItem as deleteFromFirestore,
+  clearHistory as clearFirestoreHistory,
+  saveToGlobalKnowledge,
+  getRecentHistoryByTemplate
+} from './services/historyService';
+import { fetchAppConfig } from './services/configService';
 import { auth, isConfigured } from './services/firebase'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { Zap, Loader2 } from 'lucide-react';
@@ -31,11 +40,17 @@ function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false); // Modal kích hoạt quyền Admin
+  const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   // Configuration State
   const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(!isConfigured); 
+  
+  // App Config Data (Knowledge)
+  const [templates, setTemplates] = useState<ScriptTemplate[]>(TEMPLATES);
+  const [languages, setLanguages] = useState<LanguageOption[]>(LANGUAGES);
+  const [durations, setDurations] = useState<DurationOption[]>(DURATIONS);
+  const [perspectives, setPerspectives] = useState<PerspectiveOption[]>(PERSPECTIVES);
 
   // App Logic State
   const [inputText, setInputText] = useState('');
@@ -49,6 +64,10 @@ function App() {
   
   const [selectedPersona, setSelectedPersona] = useState<'auto' | 'buffett' | 'munger'>('auto');
 
+  // AI Selection State
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>('google');
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-2.5-flash');
+
   const [isLoading, setIsLoading] = useState(false);
   const [generatedContent, setGeneratedContent] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,21 +79,33 @@ function App() {
 
   // --- Auth Initialization with Firebase ---
   useEffect(() => {
-    // Only attempt auth connection if Firebase is actually configured
     if (!isConfigured) {
       setIsCheckingAuth(false);
       return; 
     }
 
+    // 1. Fetch Dynamic Configuration
+    const loadConfig = async () => {
+        const config = await fetchAppConfig();
+        setTemplates(config.templates);
+        setLanguages(config.languages);
+        setDurations(config.durations);
+        setPerspectives(config.perspectives);
+        
+        if(config.templates.length > 0) setSelectedTemplate(config.templates[0]);
+        if(config.languages.length > 0) setSelectedLanguage(config.languages[0]);
+        if(config.durations.length > 0) setSelectedDuration(config.durations[0]);
+        if(config.perspectives.length > 0) setSelectedPerspective(config.perspectives[0]);
+    };
+    loadConfig();
+
+    // 2. Auth State Listener
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsCheckingAuth(true);
       if (user) {
-        // User is signed in, fetch profile details
         const profile = await getUserProfile(user.uid);
         if (profile) {
-           // Nếu user chưa active hoặc hết hạn, xử lý logout
            if (!profile.isActive && profile.role !== 'admin') {
-             // Chờ duyệt
              setCurrentAccount(null);
              setIsLoginOpen(true);
            } else if (profile.expiresAt !== null && Date.now() > profile.expiresAt) {
@@ -85,15 +116,15 @@ function App() {
            } else {
              setCurrentAccount(profile);
              setIsLoginOpen(false);
+             loadCloudHistory(profile.id);
            }
         } else {
-          // Profile not found or inactive
           setCurrentAccount(null);
           setIsLoginOpen(true); 
         }
       } else {
-        // User is signed out
         setCurrentAccount(null);
+        setHistory([]);
         setIsLoginOpen(true);
       }
       setIsCheckingAuth(false);
@@ -103,43 +134,50 @@ function App() {
   }, []);
 
   // --- History Logic ---
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('script_history');
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error("Failed to parse history", e);
-      }
-    }
-  }, []);
+  const loadCloudHistory = async (uid: string) => {
+    const cloudHistory = await getHistory(uid);
+    setHistory(cloudHistory);
+  };
 
-  const saveToHistory = (content: string) => {
+  const saveToHistory = async (content: string) => {
     if (!content || content.startsWith('⚠️')) return;
+    
+    // 1. Lưu vào kho chung (Global Warehouse)
+    await saveToGlobalKnowledge(
+        inputText,
+        content,
+        selectedTemplate.id,
+        selectedLanguage.id
+    );
+
+    // 2. Lưu vào lịch sử cá nhân (nếu đã đăng nhập)
+    if (!currentAccount) return;
 
     const newItem: HistoryItem = {
       id: Date.now().toString(),
+      userId: currentAccount.id,
       timestamp: Date.now(),
+      templateId: selectedTemplate.id, // Lưu lại Template ID để AI sau này học
       templateTitle: selectedTemplate.title,
       inputPreview: inputText.substring(0, 50) + (inputText.length > 50 ? '...' : ''),
       content: content
     };
 
-    const newHistory = [newItem, ...history];
-    setHistory(newHistory);
-    localStorage.setItem('script_history', JSON.stringify(newHistory));
+    setHistory(prev => [newItem, ...prev]);
+    await saveToFirestore(currentAccount.id, newItem);
   };
 
-  const deleteHistoryItem = (id: string) => {
-    const newHistory = history.filter(item => item.id !== id);
-    setHistory(newHistory);
-    localStorage.setItem('script_history', JSON.stringify(newHistory));
+  const deleteHistoryItem = async (id: string) => {
+    if (!currentAccount) return;
+    setHistory(prev => prev.filter(item => item.id !== id));
+    await deleteFromFirestore(currentAccount.id, id);
   };
   
-  const clearAllHistory = () => {
-    if(confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử?")) {
+  const clearAllHistory = async () => {
+    if (!currentAccount) return;
+    if(confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử CÁ NHÂN?\nDữ liệu đã đóng góp vào Kho tri thức chung sẽ KHÔNG bị xóa.")) {
         setHistory([]);
-        localStorage.removeItem('script_history');
+        await clearFirestoreHistory(currentAccount.id);
     }
   }
 
@@ -161,18 +199,50 @@ function App() {
         target: stats.targetChars
       });
 
-      const result = await generateScript(
-        inputText,
-        selectedTemplate,
-        selectedLanguage,
-        selectedDuration,
-        inputMode,
-        selectedPerspective,
-        customMinutes,
-        selectedPersona
-      );
+      // --- AUTO LEARNING RETRIEVAL ---
+      // Lấy các bài viết cũ của User cho mẫu này để AI học
+      let learnedExamples: string[] = [];
+      if (currentAccount) {
+         learnedExamples = await getRecentHistoryByTemplate(currentAccount.id, selectedTemplate.id);
+         if (learnedExamples.length > 0) {
+             console.log(">> AI Auto-Learning: Retrieved " + learnedExamples.length + " previous scripts.");
+         }
+      }
+
+      // --- MEMORY RETRIEVAL STRATEGY ---
+      const specificContext = currentAccount?.templateContexts?.[selectedTemplate.id];
+      const globalContext = currentAccount?.personalContext;
+      
+      const finalContext = (specificContext && specificContext.trim().length > 0) 
+                           ? specificContext 
+                           : (globalContext || "");
+
+      // Load Keys
+      const apiKeys = {
+        googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || '',
+        openaiApiKey: localStorage.getItem('openai_api_key') || '',
+        anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || '',
+        xaiApiKey: localStorage.getItem('kb_xai_api_key') || ''
+      };
+      
+      const result = await universalGenerateScript({
+        provider: selectedProvider,
+        model: selectedModelId,
+        input: inputText,
+        template: selectedTemplate,
+        language: selectedLanguage,
+        duration: selectedDuration,
+        mode: inputMode,
+        perspective: selectedPerspective,
+        customMinutes: customMinutes,
+        persona: selectedPersona,
+        personalContext: finalContext,
+        learnedExamples: learnedExamples, // Nạp bài cũ vào để AI bắt chước
+        apiKeys: apiKeys
+      });
+      
       setGeneratedContent(result);
-      saveToHistory(result);
+      await saveToHistory(result); 
       setIsModalOpen(true);
     } catch (error) {
       console.error(error);
@@ -192,9 +262,9 @@ function App() {
   const handleLoginSuccess = (account: Account) => {
     setCurrentAccount(account);
     setIsLoginOpen(false);
+    loadCloudHistory(account.id);
   };
 
-  // 1. If not configured, Force Config Modal
   if (isFirebaseConfigOpen) {
       return (
           <FirebaseConfigModal 
@@ -206,7 +276,6 @@ function App() {
       );
   }
 
-  // 2. Loading State
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
@@ -220,7 +289,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* If logged in, render the main app */}
       {currentAccount ? (
         <>
           <Header 
@@ -243,6 +311,7 @@ function App() {
 
             <section>
               <TemplateSelector 
+                templates={templates}
                 selectedTemplateId={selectedTemplate.id}
                 onSelect={setSelectedTemplate}
               />
@@ -250,6 +319,9 @@ function App() {
 
             <section>
               <ConfigSection 
+                languages={languages}
+                durations={durations}
+                perspectives={perspectives}
                 selectedTemplateId={selectedTemplate.id}
                 selectedLanguage={selectedLanguage.id}
                 onSelectLanguage={setSelectedLanguage}
@@ -261,6 +333,11 @@ function App() {
                 onSelectPerspective={setSelectedPerspective}
                 selectedPersona={selectedPersona}
                 onSelectPersona={setSelectedPersona}
+                // AI Props
+                selectedProvider={selectedProvider}
+                onSelectProvider={setSelectedProvider}
+                selectedModelId={selectedModelId}
+                onSelectModelId={setSelectedModelId}
               />
             </section>
           </main>
@@ -275,8 +352,13 @@ function App() {
                       <span>•</span>
                       <span className="font-medium text-primary-700">{selectedTemplate.title}</span>
                       <span>•</span>
-                      <span className="font-medium text-secondary-700">
-                        {selectedDuration.id === 'custom' ? `${customMinutes} phút` : selectedDuration.label}
+                      <span className={`font-bold ${
+                        selectedProvider === 'openai' ? 'text-green-600' : 
+                        selectedProvider === 'anthropic' ? 'text-orange-600' :
+                        selectedProvider === 'xai' ? 'text-slate-900' :
+                        'text-blue-600'
+                      }`}>
+                        {AI_MODELS.find(m => m.id === selectedModelId)?.name || selectedModelId}
                       </span>
                     </div>
                 </div>
@@ -325,6 +407,8 @@ function App() {
                setIsSettingsOpen(false);
                setIsAdminAuthOpen(true);
             }}
+            currentAccount={currentAccount}
+            selectedTemplate={selectedTemplate}
           />
 
           <AdminAuthModal 
