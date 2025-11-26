@@ -1,12 +1,10 @@
-
 import { auth, db } from './firebase';
-import { initializeApp, getApp, deleteApp } from "firebase/app";
+import { initializeApp, getApp, deleteApp, FirebaseApp, getApps } from "firebase/app";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
-  getAuth,
-  User as FirebaseUser
+  getAuth
 } from 'firebase/auth';
 import { 
   collection, 
@@ -15,9 +13,7 @@ import {
   getDoc, 
   getDocs, 
   updateDoc, 
-  deleteDoc,
-  query,
-  where
+  deleteDoc
 } from 'firebase/firestore';
 
 export type AccountRole = 'admin' | 'user';
@@ -68,11 +64,8 @@ export const getAccounts = async (): Promise<Account[]> => {
 // --- Core Logic ---
 
 // User Self-Registration
-// Lưu ý: Firebase Auth yêu cầu Email, nên ta sẽ dùng username làm email giả lập hoặc yêu cầu nhập email
 export const signup = async (username: string, password: string): Promise<{ ok: boolean; error?: string; account?: Account }> => {
   try {
-    // Để đơn giản, ta tự tạo email giả từ username nếu người dùng chỉ nhập username
-    // Hoặc tốt nhất là sửa UI để nhập email. Ở đây ta giả lập email:
     const email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
 
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -107,16 +100,21 @@ export const createAccountByAdmin = async (
   emailInput: string | null,
   password: string, 
   role: AccountRole, 
-  daysValid: number | null
+  daysValid: number | null // Nếu null hoặc 0 thì xem như Vĩnh viễn (hoặc xử lý riêng)
 ): Promise<{ ok: boolean; error?: string; account?: Account }> => {
   
   // STRATEGY: Secondary App Instance
-  // Chúng ta tạo một app firebase phụ để tạo user mới, tránh việc Admin bị logout khỏi app chính.
-  let secondaryApp: any = null;
+  // Tạo một instance phụ để auth không bị conflict với admin đang login
+  let secondaryApp: FirebaseApp | undefined;
 
   try {
-    const config = getApp().options; // Lấy config từ app chính
-    secondaryApp = initializeApp(config, "SecondaryApp");
+    // Lấy config từ app chính đang chạy
+    const currentApp = auth.app; 
+    const config = currentApp.options;
+    
+    // Dùng tên unique để tránh lỗi "App already exists"
+    const appName = `SecondaryApp-${Date.now()}`;
+    secondaryApp = initializeApp(config, appName);
     const secondaryAuth = getAuth(secondaryApp);
 
     // Xác định email
@@ -129,6 +127,7 @@ export const createAccountByAdmin = async (
     const user = userCredential.user;
 
     // Tính toán ngày hết hạn
+    // Nếu daysValid = -1 hoặc null -> Vĩnh viễn (null)
     let expiresAt = null;
     if (daysValid && daysValid > 0) {
       expiresAt = Date.now() + (daysValid * 24 * 60 * 60 * 1000);
@@ -147,23 +146,22 @@ export const createAccountByAdmin = async (
     // 2. Lưu vào Firestore (dùng DB chính, vì Admin đang có quyền write)
     await setDoc(doc(db, USERS_COLLECTION, user.uid), newAccount);
 
-    // 3. Cleanup: Logout user mới khỏi secondary app và xóa app đó
+    // 3. Đăng xuất khỏi secondary app ngay lập tức (good practice)
     await signOut(secondaryAuth);
-    await deleteApp(secondaryApp);
 
     return { ok: true, account: newAccount };
 
   } catch (error: any) {
     console.error("Admin Create Error:", error);
-    // Cleanup nếu lỗi
-    if (secondaryApp) {
-      try { await deleteApp(secondaryApp); } catch(e) {}
-    }
-
     let msg = error.message;
     if (msg.includes('email-already-in-use')) msg = 'Email/Username này đã tồn tại.';
     if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu.';
     return { ok: false, error: msg };
+  } finally {
+    // 4. Cleanup: Luôn luôn xóa app phụ dù thành công hay thất bại
+    if (secondaryApp) {
+      try { await deleteApp(secondaryApp); } catch(e) { console.error("Cleanup error", e); }
+    }
   }
 };
 
@@ -193,6 +191,7 @@ export const authenticate = async (username: string, password: string): Promise<
       return { ok: false, error: 'Tài khoản chưa được kích hoạt hoặc bị khóa.' };
     }
 
+    // Logic Expiry: Nếu expiresAt là null => Vĩnh viễn. Nếu có số => Check ngày.
     if (account.expiresAt !== null && Date.now() > account.expiresAt) {
       await signOut(auth);
       return { ok: false, error: 'Tài khoản đã hết hạn sử dụng.' };
@@ -219,6 +218,16 @@ export const extendAccount = async (id: string, days: number): Promise<boolean> 
     const account = await getUserProfile(id);
     if (!account) return false;
 
+    // Nếu days = -1 => Set thành Vĩnh viễn (null)
+    if (days === -1) {
+        await updateDoc(doc(db, USERS_COLLECTION, id), {
+            expiresAt: null,
+            isActive: true
+        });
+        return true;
+    }
+
+    // Nếu tài khoản đã hết hạn, tính từ hiện tại. Nếu chưa, cộng dồn.
     const baseTime = (account.expiresAt && account.expiresAt > Date.now()) ? account.expiresAt : Date.now();
     const newExpiry = baseTime + (days * 24 * 60 * 60 * 1000);
 
@@ -238,8 +247,8 @@ export const toggleAccountActive = async (id: string): Promise<boolean> => {
     const account = await getUserProfile(id);
     if (!account) return false;
     
-    // Không khoá admin gốc (nếu có logic check id)
-    if (account.username === 'admin') return false;
+    // Không khoá admin gốc
+    if (account.role === 'admin' && account.username === 'admin') return false;
 
     await updateDoc(doc(db, USERS_COLLECTION, id), {
       isActive: !account.isActive
@@ -250,14 +259,41 @@ export const toggleAccountActive = async (id: string): Promise<boolean> => {
   }
 };
 
+export const updateUserRole = async (id: string, role: AccountRole): Promise<boolean> => {
+  try {
+    await updateDoc(doc(db, USERS_COLLECTION, id), {
+      role: role
+    });
+    return true;
+  } catch (e) {
+    console.error("Error updating role:", e);
+    return false;
+  }
+};
+
 export const deleteAccount = async (id: string): Promise<boolean> => {
   try {
-    // Chỉ xoá document trong Firestore. 
-    // User trong Auth vẫn còn (cần Cloud Functions để xoá sạch hoàn toàn).
-    // Nhưng xoá trong Firestore thì user đó cũng không login được nữa (do bước check profile).
+    // Chỉ xoá document trong Firestore.
+    // Lưu ý: User Auth vẫn tồn tại (cần Firebase Cloud Functions để xóa triệt để).
+    // Nhưng xóa Firestore doc là đủ để chặn đăng nhập.
     await deleteDoc(doc(db, USERS_COLLECTION, id));
     return true;
   } catch (e) {
+    return false;
+  }
+};
+
+// Upgrade current user to Admin (Used for self-claim)
+export const upgradeToAdmin = async (uid: string): Promise<boolean> => {
+  try {
+    await updateDoc(doc(db, USERS_COLLECTION, uid), {
+      role: 'admin',
+      isActive: true,
+      expiresAt: null // Admin thường là vĩnh viễn
+    });
+    return true;
+  } catch (e) {
+    console.error("Upgrade admin error:", e);
     return false;
   }
 };

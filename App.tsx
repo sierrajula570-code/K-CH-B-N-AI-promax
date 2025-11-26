@@ -12,14 +12,16 @@ import HistoryModal from './components/HistoryModal';
 import AdminPanel from './components/AdminPanel';
 import LoginModal from './components/LoginModal';
 import SignupModal from './components/SignupModal';
-import FirebaseConfigModal from './components/FirebaseConfigModal'; // New Import
+import FirebaseConfigModal from './components/FirebaseConfigModal'; 
+import AdminAuthModal from './components/AdminAuthModal';
 import { generateScript, calculateTargetLength } from './services/geminiService';
 import { 
   getUserProfile,
   Account,
-  logout
+  logout,
+  upgradeToAdmin
 } from './services/accountService';
-import { auth, isConfigured } from './services/firebase'; // Import isConfigured
+import { auth, isConfigured } from './services/firebase'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { Zap, Loader2 } from 'lucide-react';
 
@@ -29,10 +31,11 @@ function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false); // Modal kích hoạt quyền Admin
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   // Configuration State
-  const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(!isConfigured); // Force open if not configured
+  const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(!isConfigured); 
 
   // App Logic State
   const [inputText, setInputText] = useState('');
@@ -68,9 +71,13 @@ function App() {
       if (user) {
         // User is signed in, fetch profile details
         const profile = await getUserProfile(user.uid);
-        if (profile && profile.isActive) {
-           // Check expiry
-           if (profile.expiresAt !== null && Date.now() > profile.expiresAt) {
+        if (profile) {
+           // Nếu user chưa active hoặc hết hạn, xử lý logout
+           if (!profile.isActive && profile.role !== 'admin') {
+             // Chờ duyệt
+             setCurrentAccount(null);
+             setIsLoginOpen(true);
+           } else if (profile.expiresAt !== null && Date.now() > profile.expiresAt) {
              alert("Tài khoản đã hết hạn.");
              await logout();
              setCurrentAccount(null);
@@ -312,8 +319,27 @@ function App() {
             onClose={() => setIsSettingsOpen(false)}
             onOpenFirebaseConfig={() => {
                 setIsFirebaseConfigOpen(true);
-                // We keep Settings open or close it? Close settings to focus on DB config
                 setIsSettingsOpen(false);
+            }}
+            onOpenAdminAuth={() => {
+               setIsSettingsOpen(false);
+               setIsAdminAuthOpen(true);
+            }}
+          />
+
+          <AdminAuthModal 
+            isOpen={isAdminAuthOpen}
+            onClose={() => setIsAdminAuthOpen(false)}
+            onSuccess={async () => {
+              if (currentAccount) {
+                 const success = await upgradeToAdmin(currentAccount.id);
+                 if (success) {
+                   alert("Đã nâng cấp quyền Admin thành công! Vui lòng tải lại trang.");
+                   window.location.reload();
+                 } else {
+                   alert("Có lỗi xảy ra khi nâng cấp quyền.");
+                 }
+              }
             }}
           />
 
@@ -332,7 +358,6 @@ function App() {
           />
         </>
       ) : (
-        // Login Screen Full Overlay
         <div className="relative min-h-screen bg-slate-900">
           <LoginModal 
             isOpen={isLoginOpen && !isSignupOpen && !isFirebaseConfigOpen}
@@ -358,8 +383,7 @@ function App() {
         </div>
       )}
 
-      {/* Render Config Modal on top if needed (e.g. opened from Settings while logged in) */}
-      {isFirebaseConfigOpen && currentAccount && (
+      {isFirebaseConfigOpen && (
           <FirebaseConfigModal 
               isOpen={true}
               onClose={() => setIsFirebaseConfigOpen(false)}

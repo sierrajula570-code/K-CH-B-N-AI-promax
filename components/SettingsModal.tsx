@@ -1,14 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Key, ExternalLink, Save, Eye, EyeOff, Database } from 'lucide-react';
+import { X, Key, ExternalLink, Save, Eye, EyeOff, Database, Shield } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onOpenFirebaseConfig: () => void; // New prop
+  onOpenFirebaseConfig: () => void;
+  onOpenAdminAuth: () => void; // New prop for admin claim
 }
 
-const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onOpenFirebaseConfig }) => {
+const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onOpenFirebaseConfig, onOpenAdminAuth }) => {
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
 
@@ -114,14 +115,16 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onOpenFirebaseConfig 
         </div>
 
         <div className="flex justify-between gap-3 pt-2">
-            {apiKey && (
-              <button
-                onClick={handleClear}
-                className="px-4 py-2 text-red-500 text-sm font-medium hover:bg-red-50 rounded-lg transition-colors"
-              >
-                Xóa Key
-              </button>
-            )}
+            <button
+                onClick={() => {
+                  onClose();
+                  onOpenAdminAuth();
+                }}
+                className="text-xs text-slate-400 font-medium hover:text-violet-600 hover:underline transition-colors flex items-center gap-1"
+            >
+              <Shield className="w-3 h-3" /> Kích hoạt quyền Chủ sở hữu
+            </button>
+
             <div className="flex gap-3 ml-auto">
               <button
                   onClick={onClose}
