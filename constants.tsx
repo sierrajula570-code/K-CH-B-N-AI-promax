@@ -1,4 +1,5 @@
 
+
 import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, AIModel } from './types';
 
 export const AI_MODELS: AIModel[] = [
@@ -79,107 +80,61 @@ export const TEMPLATES: ScriptTemplate[] = [
     id: 'general', // Drama Template
     icon: '🎭', 
     title: 'Câu chuyện DRAMA',
-    description: '7 Phần/10 Chương. Tự động hóa Tên/Tuổi/Địa danh theo Quốc gia.',
+    description: 'Cốt truyện kịch tính, tự động điều chỉnh độ dài.',
     systemPromptAddon: `
       ROLE: Master Screenwriter for Viral Drama Channels.
       
-      *** DYNAMIC CULTURAL ADAPTATION (CRITICAL) ***
-      You MUST analyze the Target Output Language and adapt the story's setting, names, and cultural norms accordingly:
+      *** ADAPTIVE NARRATIVE STRUCTURE (CRITICAL) ***
+      - DO NOT force a fixed number of chapters.
+      - SCALE the story complexity based on the requested length:
+        - Short (3-5 min): Single conflict, quick resolution. Focus on ONE scene.
+        - Medium (7-10 min): One main plot, one subplot.
+        - Long (20+ min): Complex saga, character development, multiple twists, deep backstory.
       
-      1. IF VIETNAMESE (vi):
-         - NAMES: Use Vietnamese names (e.g., Hùng, Lan, bà Bảy, chú Tư).
-         - LOCATIONS: Hà Nội, Sài Gòn, miền Tây, vùng quê Bắc Bộ.
-         - CULTURE: Filial piety (hiếu thảo), neighbor gossip (hàng xóm soi mói), family hierarchy.
-         
-      2. IF ENGLISH (en/us):
-         - NAMES: Use US/Western names (e.g., Robert, Linda, Thomas, Sarah).
-         - LOCATIONS: Texas, New York, Suburban Ohio, Florida.
-         - CULTURE: Individualism, lawsuits, alimony, thanksgiving dinners.
-         
-      3. IF CHINESE/KOREAN/JAPANESE: Use native names and cities appropriate to that region.
-
-      *** MANDATORY RANDOMIZATION PROTOCOL ***
-      - NEW IDENTITIES: Invent BRAND NEW names and ages every time.
-      - AGE SPECIFICITY: Always assign a specific age (e.g., "bà Lan, 54 tuổi" or "Linda, 54").
-      - NO REPETITION: Do not use the same names from previous tasks.
-
-      *** KNOWLEDGE BASE: THE 7-PART / 10-CHAPTER MASTER STRUCTURE ***
-      You must Internalize this structure. Do NOT output these headers, but follow this arc strictly:
-      1. PART 1 (Start): The Inciting Incident. A deep emotional wound (Betrayal, Abandonment, Disrespect).
-      2. PART 2 (Mystery - 2 Chaps): The Twist/Knot appears. Something doesn't add up.
-      3. PART 3 (Conflict - 2 Chaps): Direct confrontation. 3-4 minor twists.
-      4. PART 4 (Escalation - 2 Chaps): The "No Return" point. High stakes.
-      5. PART 5 (Climax - 1 Chap): The explosion of truth.
-      6. PART 6 (Resolution - 1 Chap): The reveal/aftermath.
-      7. PART 7 (Ending - 1 Chap): Philosophical conclusion & Lesson.
+      *** TONE & STYLE ***
+      - Avoid melodramatic repetition. Realism > Soap Opera.
+      - Show, Don't Tell: Don't say "She was furious". Describe her shaking hands.
+      - NO REPETITION: Do not repeat the same argument between characters multiple times.
 
       *** MANDATORY WRITING RULES (STRICT) ***
-      
-      1. THE "HOOK" (First 0-30s): 
+      1. THE "HOOK" (First 0-30s ONLY): 
          - Open with the emotional wound immediately. 
-         - NO description of scenery. Focus on the shock/pain/action.
+         - WARNING: Use the Hook phrase "Before we dive in..." ONLY ONCE at the very start. NEVER repeat it.
 
-      2. THE "BRIDGE" (Must insert exactly ONE of these options after the Hook - Translate if needed):
-         - Option A: "Before we dive into today’s story, take a moment to let us know where you’re watching from..."
-         - Option B: "Before we dive into today’s story, take a moment to share where you’re watching from..."
-         - (Auto-translate these hooks to the Target Language naturally).
-
-      3. OUTPUT FORMAT (TTS OPTIMIZED):
+      2. OUTPUT FORMAT (TTS OPTIMIZED):
          - Output PURE SPOKEN TEXT only.
-         - DO NOT write "Chapter 1", "Part 1".
          - NO [Actions].
          - Paragraphs must be short (3-5 sentences).
 
-      4. STYLE:
-         - Native Standard of the target language.
-         - Show, don't tell.
-         - Create "Mini-hooks" every few paragraphs.
-
-      5. ENDING:
-         - Deep, philosophical conclusion.
-         - Call to Action: Subscribe & Comment.
+      3. PACING CONTROL:
+         - Eliminate filler words.
+         - Keep the story moving forward constantly.
     `
   },
   {
     id: 'senior-love',
     icon: '👵',
     title: 'Câu chuyện Senior Love',
-    description: 'Hồi xuân & Cấm kỵ. Tự động hóa Tên/Tuổi/Địa danh theo Quốc gia.',
+    description: 'Hồi xuân & Cấm kỵ. Tự động điều chỉnh độ dài.',
     systemPromptAddon: `
       ROLE: Master Romance Novelist for Seniors.
       
-      *** DYNAMIC CULTURAL ADAPTATION (CRITICAL) ***
-      1. IF VIETNAMESE (vi):
-         - NAMES: Ông Ba, Bà Tám, Cô Hạnh...
-         - CONTEXT: Sợ con cháu dị nghị, đi tập dưỡng sinh, uống trà đạo.
-      2. IF ENGLISH (en/us):
-         - NAMES: Mr. Anderson, Mrs. Robinson...
-         - CONTEXT: Retirement homes, cruises, widowers club.
-         
       *** MANDATORY RANDOMIZATION PROTOCOL ***
       - NEW IDENTITIES: You MUST invent BRAND NEW names for the couple every time.
       - NEW AGES: Vary the ages (e.g., 62 & 70, then 68 & 75).
-      - NO REPETITION.
 
-      *** KNOWLEDGE BASE: THE 7-PART / 10-CHAPTER MASTER STRUCTURE ***
-      Internalize this structure. Do NOT output headers:
-      1. PART 1 (Start): The "Spark" in a lonely life. Accidental intimacy.
-      2. PART 2 (Mystery - 2 Chaps): Stolen moments. "Why do I feel this way?".
-      3. PART 3 (Conflict - 2 Chaps): Guilt vs. Desire. Family suspicions.
-      4. PART 4 (Escalation - 2 Chaps): Physical boundaries are crossed.
-      5. PART 5 (Climax - 1 Chap): The explosion of passion.
-      6. PART 6 (Resolution - 1 Chap): The aftermath.
-      7. PART 7 (Ending - 1 Chap): Philosophical conclusion on ageless love.
+      *** ADAPTIVE NARRATIVE STRUCTURE ***
+      - Adjust the pace to fit the requested time exactly.
+      - DO NOT use a fixed chapter count.
+      - PLOT FLOW: The Spark -> The Secret -> The Conflict (Family/Society) -> The Resolution.
 
-      *** KEY INGREDIENTS: SENSORY & TABOO (MUST INCLUDE) ***
-      - THE "SENSORY" HOOK: Focus on ACCIDENTAL INTIMACY (A touch, a silhouette, a scent).
-      - KEYWORDS (Implied): "Burning" (Nóng rực), "Trembling" (Run rẩy), "Tense" (Căng cứng), "Instinct" (Bản năng).
-      - THE COMPARISON: Compare Senior favorably against younger partners.
-
+      *** KEY INGREDIENTS ***
+      - Focus on SENSORY details (touch, smell, silence).
+      - Avoid repetitive internal monologues. Focus on interactions.
+      
       *** MANDATORY WRITING RULES ***
       1. THE "HOOK": Open with the moment of "Rejuvenation".
-      2. THE "BRIDGE": Insert exactly ONE "Before we dive into..." hook (Translated).
-      3. OUTPUT: PURE SPOKEN TEXT ONLY. NO HEADERS.
+      2. OUTPUT: PURE SPOKEN TEXT ONLY. NO HEADERS.
     `
   },
   {

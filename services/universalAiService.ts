@@ -44,17 +44,18 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
   }
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
-  // Math: CJK ~300 chars/min, Latin fixed at 1000 chars/min per user request
+  
+  // USER REQUIREMENT: FIXED EXACTLY AT 1000 CHARS / MIN
   let targetChars = 0;
   if (isCJK) {
     targetChars = Math.round(minutes * 300);
   } else {
-    targetChars = Math.round(minutes * 1000);
+    targetChars = Math.round(minutes * 1000); 
   }
 
-  // Strict range to avoid overflowing (Target +/- 10%)
-  const minChars = Math.round(targetChars * 0.90); 
-  const maxChars = Math.round(targetChars * 1.10); 
+  // Strict range to avoid overflowing (Target +/- 5% only)
+  const minChars = Math.round(targetChars * 0.95); 
+  const maxChars = Math.round(targetChars * 1.05); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -80,6 +81,8 @@ const cleanArtifacts = (text: string): string => {
   // 4. Remove Common AI Chaining Phrases
   cleaned = cleaned.replace(/Here is the (next|continuation).*?:/gi, '');
   cleaned = cleaned.replace(/Continuing from where we left off.*?/gi, '');
+  cleaned = cleaned.replace(/As mentioned in the previous part.*?/gi, '');
+  cleaned = cleaned.replace(/Before we dive in.*?/gi, ''); // Remove repeated hooks
 
   // 5. Cleanup Multiple Newlines to single/double
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
@@ -149,12 +152,6 @@ const buildSystemInstruction = (
       ${learnedExamples[0]}
       --- [END EXAMPLE 1] ---
       
-      ${learnedExamples.length > 1 ? `
-      --- [PAST EXAMPLE 2] ---
-      ${learnedExamples[1]}
-      --- [END EXAMPLE 2] ---
-      ` : ''}
-      
       INSTRUCTION: Write the NEW script so it feels consistent with the examples above.
     `;
   }
@@ -167,7 +164,6 @@ const buildSystemInstruction = (
     - YOU MUST ADAPT THE STORY TO THE CULTURE OF: ${language.code.toUpperCase()}.
     - CHANGE NAMES: Use common names from that country (e.g., English=John, Vietnamese=Hùng).
     - CHANGE LOCATIONS: Use cities/regions from that country.
-    - CHANGE CURRENCY: Use the local currency (USD, VND, JPY).
     
     ROLE: Expert YouTube Scriptwriter & Voice Director.
     TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.
@@ -201,6 +197,7 @@ const buildSystemInstruction = (
        - AVOID filler words.
        - Use natural punctuation.
        - Ensure logic flows: Hook -> Development -> Climax -> Conclusion.
+       - DO NOT Summarize or say "In conclusion" unless it is the very end.
 
     ${languageRules}
 
@@ -235,7 +232,7 @@ async function callAnthropic(apiKey: string, model: string, system: string, user
       'content-type': 'application/json', 
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true' // Needed for client-side calls
+      'anthropic-dangerous-direct-browser-access': 'true' 
     },
     body: JSON.stringify({
       model,
@@ -269,14 +266,13 @@ async function callGoogle(apiKey: string, model: string, system: string, user: s
   if (!apiKey) throw new Error("Thiếu Google API Key.");
   const ai = new GoogleGenAI({ apiKey });
   
-  // Handling retry logic internally for Google as it's prone to 429 in free tier
   const generate = async (retries = 3, backoff = 5000): Promise<string> => {
     try {
-      // Lower temperature to 0.7 to avoid verbose hallucination
+      // Reduced temperature to 0.65 to reduce hallucinations/rambling
       const response = await ai.models.generateContent({
         model: model,
         contents: user,
-        config: { systemInstruction: system, temperature: 0.7 }
+        config: { systemInstruction: system, temperature: 0.65 }
       });
       return response.text || "";
     } catch (error: any) {
@@ -302,7 +298,6 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
 
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
-  // Pass learnedExamples to system instruction builder
   const systemInstruction = buildSystemInstruction(
       template, 
       language, 
@@ -312,8 +307,8 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
       learnedExamples 
   );
   
-  // Decide Strategy: Single vs Chained
-  // Keep Chunk Duration at 5 minutes to balance coherence vs length
+  // Decide Strategy
+  // 5 minutes per chunk ensures the AI has enough context but doesn't drift
   const CHUNK_DURATION = 5;
   const useChainedGeneration = config.minutes > 6; 
 
@@ -330,90 +325,115 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
   try {
     if (!useChainedGeneration) {
       // --- SINGLE PASS ---
+      // Using 4.5 divisor to be conservative and prevent over-writing
+      const maxWords = Math.round(config.targetChars / 4.5);
+
       const userPrompt = `
-        TASK: Write a ${config.minutes}-minute script (~${config.targetChars} chars).
+        TASK: Write a ${config.minutes}-minute script.
+        TARGET LENGTH: ~${config.targetChars} characters (Approx ${maxWords} words).
         OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
         INPUT TOPIC: "${input}"
-        STRUCTURE:
-        - Divide into logical "CHAPTERS" (but do not use headers).
-        - Every 30 seconds (~500 chars), insert a "Mini-Hook" or curiosity gap.
         
-        STRICT REQUIREMENT: 
-        - DO NOT output any structural labels like "Part 1" or "Chapter 1".
-        - The output must be continuous spoken text ready for TTS.
-        - YOU MUST HIT AT LEAST ${config.minChars} CHARACTERS.
+        STRUCTURE:
+        - Write continuously. No headers.
+        - Insert ONE strong "Hook" at the beginning.
+        
+        STRICT LENGTH CONSTRAINT:
+        - Do NOT exceed ${maxWords + 100} words.
+        - Stop when you have reached the logical conclusion.
       `;
       const rawText = await executeCall(systemInstruction, userPrompt);
       return cleanArtifacts(rawText);
 
     } else {
-      // --- CHAINED GENERATION ---
+      // --- CHAINED GENERATION WITH PACING CONTROL ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
       
-      // Dynamic Chunk Target calculation
-      // Divide total target by parts to ensure we don't overshoot
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      // Rough estimate for words (Vietnamese/English vary, but 4.5 chars/word is safe)
-      const wordTarget = Math.round(chunkCharsTarget / 4.5); 
+      // Explicit word count targets (AI understands words better than characters)
+      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5); 
       
       let fullScript = "";
       let previousContext = "";
 
-      console.log(`🚀 Starting Universal Chain (${provider}): ${totalParts} Parts. Target per part: ${chunkCharsTarget}`);
+      console.log(`🚀 Starting Universal Chain (${provider}): ${totalParts} Parts. Target per part: ~${chunkWordTarget} words.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
         let partPrompt = "";
 
+        // --- DYNAMIC PACING CHECK ---
+        const currentTotalLength = fullScript.length;
+        const expectedProgressLength = (i - 1) * chunkCharsTarget;
+        
+        let pacingInstruction = "";
+        if (i > 1) {
+            // Check if previous parts were too long
+            if (currentTotalLength > expectedProgressLength * 1.15) {
+                pacingInstruction = `
+                  URGENT PACING CORRECTION: You are writing TOO MUCH. 
+                  - CONDENSE this part significantly.
+                  - SKIP minor details.
+                  - Focus ONLY on the main plot progression.
+                  - WRITE FASTER/SHORTER.
+                `;
+            } else if (currentTotalLength < expectedProgressLength * 0.85) {
+                pacingInstruction = "NOTE: You are writing too briefly. Please expand on details, emotions, and atmosphere more deeply.";
+            } else {
+                pacingInstruction = "PACING IS GOOD. Maintain this density.";
+            }
+        }
+
         if (isFirst) {
           partPrompt = `
             *** PART 1 of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
-            TOPIC: "${input}"
-            INSTRUCTIONS:
-            1. Start with a powerful HOOK.
-            2. Develop the first 1-2 CHAPTERS/PARTS of the story.
-            3. Paragraphs: 3-5 sentences. NO LISTS.
-            4. END this part in the middle of a transition.
+            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES.
+            TARGET LENGTH: ~${chunkWordTarget} words.
             
-            STRICT RULES: 
-            - DO NOT output "Part 1" header.
-            - Start directly with the story.
-            - DO NOT EXCEED THE LENGTH significantly. Be concise and impactful.
+            TOPIC: "${input}"
+            
+            INSTRUCTIONS:
+            1. Start with a powerful HOOK (e.g., "The betrayal happened on a Tuesday...").
+            2. Develop the inciting incident and rising action.
+            3. Paragraphs: 3-5 sentences. NO LISTS.
+            
+            STRICT LENGTH CONSTRAINT:
+            - STOP writing after approximately ${chunkWordTarget} words.
           `;
         } else {
           partPrompt = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
-            TOPIC: "${input}"
-            CONTEXT FROM PREVIOUS PART: "...${previousContext.slice(-500)}"
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES.
+            TARGET LENGTH: ~${chunkWordTarget} words.
             
-            CRITICAL SEAMLESS INSTRUCTIONS:
-            1. START IMMEDIATELY where the context left off. 
-            2. DO NOT write an intro (No "Welcome back", No "Here is the next part").
-            3. DO NOT use headers like "Chapter 2".
-            4. Maintain the story flow.
+            PREVIOUS CONTEXT (LAST 500 CHARS): 
+            "...${previousContext.slice(-600)}"
+            
+            PACING CHECK: ${pacingInstruction}
+
+            *** CRITICAL ANTI-REPETITION RULES ***
+            1. DO NOT RECAP the previous part.
+            2. DO NOT START with "Welcome back" or "In the last part".
+            3. DO NOT REPEAT the "Hook" (e.g., "Before we dive in...").
+            4. CONTINUE THE STORY IMMEDIATELY from the last sentence of the context.
             
             STRICT LENGTH CONSTRAINT:
-            - Target: ~${chunkCharsTarget} chars.
-            - DO NOT WRITE TOO MUCH. Quality over Quantity.
+            - STOP writing after approximately ${chunkWordTarget} words.
             
-            ${isLast ? "5. WRAP UP: Bring all threads to a Climax and then a thought-provoking Conclusion." : "5. End this part on a transition, ready for the next part."}
+            ${isLast ? "5. WRAP UP: Bring all threads to a logical conclusion." : "5. End this part on a transition."}
           `;
         }
 
         let partText = await executeCall(systemInstruction, partPrompt);
-        
-        // --- CLEANING ARTIFACTS BEFORE APPENDING ---
         partText = cleanArtifacts(partText);
 
         fullScript += (isFirst ? "" : " ") + partText;
         previousContext = partText;
 
-        if (!isLast) await delay(1000); // polite delay
+        if (!isLast) await delay(1000); 
       }
       return fullScript;
     }

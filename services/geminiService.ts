@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
@@ -58,7 +59,7 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
   
-  // Math: CJK ~300 chars/min, Latin fixed at 1000 chars/min per user request
+  // FIXED: Exactly 1000 chars/min as requested
   let targetChars = 0;
   if (isCJK) {
     targetChars = Math.round(minutes * 300);
@@ -66,9 +67,9 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
     targetChars = Math.round(minutes * 1000);
   }
 
-  // Strict range (Target +/- 10%)
-  const minChars = Math.round(targetChars * 0.90); 
-  const maxChars = Math.round(targetChars * 1.10); 
+  // Strict range (Target +/- 5%)
+  const minChars = Math.round(targetChars * 0.95); 
+  const maxChars = Math.round(targetChars * 1.05); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -217,23 +218,27 @@ export const generateScript = async (
   try {
     if (!useChainedGeneration) {
       // --- SINGLE PASS STRATEGY ---
+      const maxWords = Math.round(config.targetChars / 4.5);
+      
       const prompt = `
-        TASK: Write a ${config.minutes}-minute script (~${config.targetChars} chars).
+        TASK: Write a ${config.minutes}-minute script.
+        TARGET LENGTH: ~${config.targetChars} chars (Approx ${maxWords} words).
         OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
         INPUT TOPIC: "${input}"
         
         STRUCTURE:
         - Divide into logical "CHAPTERS" (but do not use headers).
-        - Every 30 seconds (~400 chars), insert a "Mini-Hook" or curiosity gap.
+        - Start with ONE strong Hook.
         
-        REQUIREMENT: YOU MUST HIT AT LEAST ${config.minChars} CHARACTERS.
-        Expand on every point. Do not summarize.
+        STRICT LENGTH CONSTRAINT:
+        - Do NOT exceed ${maxWords + 100} words.
+        - Stop when you have reached the logical conclusion.
       `;
 
       const response = await generateWithRetry(ai, {
         model: 'gemini-2.5-flash',
         contents: prompt,
-        config: { systemInstruction: baseInstruction, temperature: 0.7 }
+        config: { systemInstruction: baseInstruction, temperature: 0.65 } // Reduced Temp
       });
       
       return response.text || "No content.";
@@ -242,12 +247,12 @@ export const generateScript = async (
       // --- SEAMLESS CHAINED GENERATION STRATEGY ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      const wordTarget = Math.round(chunkCharsTarget / 4.5); 
+      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5); // ~250 words per 1000 chars
 
       let fullScript = "";
       let previousContext = ""; 
 
-      console.log(`🚀 Starting Seamless Chain: ${totalParts} Parts for ${config.minutes} mins`);
+      console.log(`🚀 Starting Seamless Chain: ${totalParts} Parts for ${config.minutes} mins. Target: ~${chunkWordTarget} words/part.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
@@ -255,38 +260,55 @@ export const generateScript = async (
         
         let partPrompt = "";
 
+        // Pacing Logic
+        const currentTotalLength = fullScript.length;
+        const expectedProgressLength = (i - 1) * chunkCharsTarget;
+        let pacingInstruction = "";
+        
+        if (i > 1) {
+             if (currentTotalLength > expectedProgressLength * 1.15) {
+                pacingInstruction = "WARNING: You are WRITING TOO MUCH. CONDENSE this part significantly.";
+            } else if (currentTotalLength < expectedProgressLength * 0.85) {
+                pacingInstruction = "NOTE: You are writing too briefly. Please expand on details.";
+            }
+        }
+
         if (isFirst) {
           partPrompt = `
             *** PART 1 of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
+            GOAL: Write the FIRST ${CHUNK_DURATION} MINUTES.
+            TARGET LENGTH: ~${chunkWordTarget} words.
             TOPIC: "${input}"
 
             INSTRUCTIONS:
-            1. Start with a powerful HOOK (5-10s) that creates an emotional gap.
+            1. Start with a powerful HOOK (5-10s).
             2. Develop the first 1-2 CHAPTERS of the story.
             3. Each paragraph must be 3-5 sentences. NO LISTS.
-            4. END this part in the middle of a transition.
             
-            STRICT RULE: Write concise. Do not exceed ~${chunkCharsTarget} characters.
+            STRICT RULE: STOP writing after approximately ${chunkWordTarget} words.
           `;
         } else {
           partPrompt = `
             *** PART ${i} of ${totalParts} ***
             OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkCharsTarget} chars / ~${wordTarget} words).
+            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES.
+            TARGET LENGTH: ~${chunkWordTarget} words.
+            
+            PACING: ${pacingInstruction}
+            
             TOPIC: "${input}"
-
-            CONTEXT FROM PREVIOUS PART (Last 500 chars):
-            "...${previousContext.slice(-500)}"
+            CONTEXT FROM PREVIOUS PART (DO NOT REPEAT):
+            "...${previousContext.slice(-600)}"
 
             CRITICAL SEAMLESS INSTRUCTIONS:
             1. START IMMEDIATELY where the context left off. 
-            2. DO NOT write an intro (No "Welcome back", No "In this part").
-            3. Maintain the "Chapter" structure.
+            2. DO NOT write an intro.
+            3. DO NOT recap what happened.
+            4. DO NOT use the "Before we dive in" hook again.
             
             STRICT LENGTH CONSTRAINT:
-            - Target: ~${chunkCharsTarget} chars.
+            - Target: ~${chunkWordTarget} words.
             - DO NOT WRITE TOO MUCH. Quality over Quantity.
             
             ${isLast 
@@ -301,7 +323,7 @@ export const generateScript = async (
         const response = await generateWithRetry(ai, {
           model: 'gemini-2.5-flash',
           contents: partPrompt,
-          config: { systemInstruction: baseInstruction, temperature: 0.7 }
+          config: { systemInstruction: baseInstruction, temperature: 0.65 }
         });
 
         let partText = response.text || "";
