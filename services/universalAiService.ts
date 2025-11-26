@@ -103,11 +103,12 @@ const buildSystemInstruction = (
       - VIETNAMESE SPECIFIC:
       - Read numbers as words (e.g., "2024" -> "hai nghìn không trăm hai mươi tư").
       - Use "VTV" style: Formal, clear, precise.
-      - Translate any English input terms to Vietnamese unless they are proper nouns.
+      - LOCALIZATION: Use Vietnamese names (Hùng, Lan, Tuấn...) and locations (Hà Nội, Sài Gòn...) unless the topic implies otherwise.
     `;
   } else {
     languageRules = `
       - Ensure natural phrasing for native speakers of ${language.code}.
+      - LOCALIZATION: Adapt names, cities, and currency to match ${language.code} culture.
       - If input is in a different language, TRANSLATE IT COMPLETELY.
     `;
   }
@@ -161,7 +162,12 @@ const buildSystemInstruction = (
   return `
     *** CRITICAL LANGUAGE FIREWALL ***
     YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
-    IF THE INPUT IS IN ENGLISH/OTHER, YOU MUST TRANSLATE AND ADAPT IT TO ${language.code.toUpperCase()}.
+    
+    *** CULTURAL LOCALIZATION (MANDATORY) ***
+    - YOU MUST ADAPT THE STORY TO THE CULTURE OF: ${language.code.toUpperCase()}.
+    - CHANGE NAMES: Use common names from that country (e.g., English=John, Vietnamese=Hùng).
+    - CHANGE LOCATIONS: Use cities/regions from that country.
+    - CHANGE CURRENCY: Use the local currency (USD, VND, JPY).
     
     ROLE: Expert YouTube Scriptwriter & Voice Director.
     TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.

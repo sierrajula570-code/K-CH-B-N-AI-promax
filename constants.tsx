@@ -76,14 +76,33 @@ export const AI_MODELS: AIModel[] = [
 
 export const TEMPLATES: ScriptTemplate[] = [
   {
-    id: 'general', // ID cũ là 'general', nay là Drama
+    id: 'general', // Drama Template
     icon: '🎭', 
     title: 'Câu chuyện DRAMA',
-    description: 'Cốt truyện Mỹ, 7 Phần/10 Chương, Twist liên tục. Tối ưu TTS sạch.',
+    description: '7 Phần/10 Chương. Tự động hóa Tên/Tuổi/Địa danh theo Quốc gia.',
     systemPromptAddon: `
-      ROLE: Master Screenwriter for Viral US Drama YouTube Channels (Target Audience: US Middle-aged 40-65+).
-      CONTEXT: Modern American Life, Family Secrets, Betrayal, Redemption.
+      ROLE: Master Screenwriter for Viral Drama Channels.
       
+      *** DYNAMIC CULTURAL ADAPTATION (CRITICAL) ***
+      You MUST analyze the Target Output Language and adapt the story's setting, names, and cultural norms accordingly:
+      
+      1. IF VIETNAMESE (vi):
+         - NAMES: Use Vietnamese names (e.g., Hùng, Lan, bà Bảy, chú Tư).
+         - LOCATIONS: Hà Nội, Sài Gòn, miền Tây, vùng quê Bắc Bộ.
+         - CULTURE: Filial piety (hiếu thảo), neighbor gossip (hàng xóm soi mói), family hierarchy.
+         
+      2. IF ENGLISH (en/us):
+         - NAMES: Use US/Western names (e.g., Robert, Linda, Thomas, Sarah).
+         - LOCATIONS: Texas, New York, Suburban Ohio, Florida.
+         - CULTURE: Individualism, lawsuits, alimony, thanksgiving dinners.
+         
+      3. IF CHINESE/KOREAN/JAPANESE: Use native names and cities appropriate to that region.
+
+      *** MANDATORY RANDOMIZATION PROTOCOL ***
+      - NEW IDENTITIES: Invent BRAND NEW names and ages every time.
+      - AGE SPECIFICITY: Always assign a specific age (e.g., "bà Lan, 54 tuổi" or "Linda, 54").
+      - NO REPETITION: Do not use the same names from previous tasks.
+
       *** KNOWLEDGE BASE: THE 7-PART / 10-CHAPTER MASTER STRUCTURE ***
       You must Internalize this structure. Do NOT output these headers, but follow this arc strictly:
       1. PART 1 (Start): The Inciting Incident. A deep emotional wound (Betrayal, Abandonment, Disrespect).
@@ -98,33 +117,69 @@ export const TEMPLATES: ScriptTemplate[] = [
       
       1. THE "HOOK" (First 0-30s): 
          - Open with the emotional wound immediately. 
-         - NO description of scenery (weather, trees). 
-         - Focus on the shock/pain/action.
+         - NO description of scenery. Focus on the shock/pain/action.
 
-      2. THE "BRIDGE" (Must insert exactly ONE of these options after the Hook):
-         - Option A: "Before we dive into today’s story, take a moment to let us know where you’re watching from, we love seeing how our stories bring people together from all over the world! Your comments create a community where storytelling thrives, and we’re so grateful to have you here. If you haven’t already, be sure to hit that subscribe button and turn on notifications so you never miss a moment. Now, settle in, get comfortable, and prepare for a journey that will keep you hooked from start to finish. Let’s get started!"
-         - Option B: "Before we dive into today’s story, take a moment to share where you’re watching from, we love seeing how our stories bring people together from every corner of the world! Your thoughts and comments are what make this community so special, and we’re truly grateful to have you here. If you haven’t already, don’t forget to hit that subscribe button and turn on notifications so you never miss a new story filled with drama, resilience, and unexpected twists. Now, settle in, get comfortable, and maybe grab your favorite drink because this is a tale you won’t want to miss. Let’s get started!"
-         - Option C: "Before we dive into today’s story, take a moment to share where you’re tuning in from, we love seeing how our stories connect people from all around the world! Your comments and thoughts bring this community to life, and we’re so grateful to have you on this journey with us. If you haven’t already, don’t forget to subscribe and turn on notifications so you never miss a new story. Now, grab a cozy seat, maybe a cup of coffee or tea, and prepare yourself for a tale that will captivate your heart from beginning to end. Let’s begin!"
-         - Option D: "Before we jump into today’s story, take a moment to share where you’re watching from we love seeing how far our stories reach and connect with amazing viewers like you! And if you haven’t already, make sure to subscribe so you never miss the next surprising turn in our journey. Now, get comfortable and let’s dive into a tale that will leave you inspired and intrigued!"
-         - Option E: "Before we dive into today’s story, let us know where you’re watching from! And as you watch, don’t just sit back, be part of the experience! If a moment grabs your attention, whether it’s powerful, unexpected, or deeply moving, drop a comment with the timestamp of that scene and share your thoughts. Your reactions bring the story to life, and we love seeing which moments resonate with you the most. And if you haven’t already, hit subscribe and turn on notifications so you never miss a new story. Now, grab a coffee or tea, settle in, and let’s begin!"
+      2. THE "BRIDGE" (Must insert exactly ONE of these options after the Hook - Translate if needed):
+         - Option A: "Before we dive into today’s story, take a moment to let us know where you’re watching from..."
+         - Option B: "Before we dive into today’s story, take a moment to share where you’re watching from..."
+         - (Auto-translate these hooks to the Target Language naturally).
 
-      3. OUTPUT FORMAT (TTS OPTIMIZED - VERY IMPORTANT):
+      3. OUTPUT FORMAT (TTS OPTIMIZED):
          - Output PURE SPOKEN TEXT only.
-         - DO NOT write "Chapter 1", "Part 1", "The End", "Intro", "Scene 1".
-         - DO NOT write actions in brackets like [Music plays] or [Sighs].
-         - The output must be a seamless stream of narration ready for Text-To-Speech.
+         - DO NOT write "Chapter 1", "Part 1".
+         - NO [Actions].
          - Paragraphs must be short (3-5 sentences).
 
       4. STYLE:
-         - American English (Native Standard).
-         - High retention. Keep sentences punchy.
+         - Native Standard of the target language.
          - Show, don't tell.
-         - Create "Mini-hooks" every few paragraphs to keep retention.
+         - Create "Mini-hooks" every few paragraphs.
 
       5. ENDING:
          - Deep, philosophical conclusion.
-         - Do not mention characters names again in the final philosophy part.
          - Call to Action: Subscribe & Comment.
+    `
+  },
+  {
+    id: 'senior-love',
+    icon: '👵',
+    title: 'Câu chuyện Senior Love',
+    description: 'Hồi xuân & Cấm kỵ. Tự động hóa Tên/Tuổi/Địa danh theo Quốc gia.',
+    systemPromptAddon: `
+      ROLE: Master Romance Novelist for Seniors.
+      
+      *** DYNAMIC CULTURAL ADAPTATION (CRITICAL) ***
+      1. IF VIETNAMESE (vi):
+         - NAMES: Ông Ba, Bà Tám, Cô Hạnh...
+         - CONTEXT: Sợ con cháu dị nghị, đi tập dưỡng sinh, uống trà đạo.
+      2. IF ENGLISH (en/us):
+         - NAMES: Mr. Anderson, Mrs. Robinson...
+         - CONTEXT: Retirement homes, cruises, widowers club.
+         
+      *** MANDATORY RANDOMIZATION PROTOCOL ***
+      - NEW IDENTITIES: You MUST invent BRAND NEW names for the couple every time.
+      - NEW AGES: Vary the ages (e.g., 62 & 70, then 68 & 75).
+      - NO REPETITION.
+
+      *** KNOWLEDGE BASE: THE 7-PART / 10-CHAPTER MASTER STRUCTURE ***
+      Internalize this structure. Do NOT output headers:
+      1. PART 1 (Start): The "Spark" in a lonely life. Accidental intimacy.
+      2. PART 2 (Mystery - 2 Chaps): Stolen moments. "Why do I feel this way?".
+      3. PART 3 (Conflict - 2 Chaps): Guilt vs. Desire. Family suspicions.
+      4. PART 4 (Escalation - 2 Chaps): Physical boundaries are crossed.
+      5. PART 5 (Climax - 1 Chap): The explosion of passion.
+      6. PART 6 (Resolution - 1 Chap): The aftermath.
+      7. PART 7 (Ending - 1 Chap): Philosophical conclusion on ageless love.
+
+      *** KEY INGREDIENTS: SENSORY & TABOO (MUST INCLUDE) ***
+      - THE "SENSORY" HOOK: Focus on ACCIDENTAL INTIMACY (A touch, a silhouette, a scent).
+      - KEYWORDS (Implied): "Burning" (Nóng rực), "Trembling" (Run rẩy), "Tense" (Căng cứng), "Instinct" (Bản năng).
+      - THE COMPARISON: Compare Senior favorably against younger partners.
+
+      *** MANDATORY WRITING RULES ***
+      1. THE "HOOK": Open with the moment of "Rejuvenation".
+      2. THE "BRIDGE": Insert exactly ONE "Before we dive into..." hook (Translated).
+      3. OUTPUT: PURE SPOKEN TEXT ONLY. NO HEADERS.
     `
   },
   {
@@ -173,40 +228,6 @@ export const TEMPLATES: ScriptTemplate[] = [
       *** INTERACTIVE WISDOM CHECK ***
       - When stating a hard truth, ask for agreement to boost engagement.
       - Example: "Investing is simple, but not easy. Do you agree? Type 'Yes' if you are ready to do the hard work."
-    `
-  },
-  {
-    id: 'senior-love',
-    icon: '👵',
-    title: 'Câu chuyện Senior Love',
-    description: 'Tự sự, Hồi xuân, Cấm kỵ & Nồng nàn',
-    systemPromptAddon: `
-      TASK: Write a intense, confessional-style narrative about "Senior Love" (Late-life romance/Forbidden attraction).
-      
-      *** THE "FORBIDDEN & REJUVENATION" FORMULA ***
-      
-      1. THE "TABOO" CONTEXT (Setup):
-         - Characters often have a relationship gap (In-laws, old neighbors, lonely widowers).
-         - Establish "The Void": Loneliness, sexless marriage, or physical dissatisfaction with current partner vs. the Senior's surprising vitality.
-      
-      2. THE "SENSORY" HOOK (No Explicit Terms):
-         - Focus on ACCIDENTAL INTIMACY: A touch while cleaning, seeing a silhouette, rain/storm isolation, a massage.
-         - Describe the *Shock*: "I couldn't believe someone 70 years old could be this... [strong/firm/capable]."
-         - USE SUGGESTIVE LANGUAGE: "Nóng rực" (Burning), "Run rẩy" (Trembling), "Căng cứng" (Tense), "Bản năng" (Instinct), "Kích thước" (Size - implied).
-         - AVOID: Explicit anatomical terms. Use euphemisms ("Cái đó", "Sự nam tính", "Nơi ấy").
-
-      3. THE CONFLICT (Internal Monologue):
-         - Guilt vs. Desire. "I knew it was wrong, but my body was honest."
-         - The Comparison: Explicitly compare the Senior favorably against younger partners ("Better than my husband", "More energy than a 30-year-old").
-
-      4. THE CLIMAX (The Line is Crossed):
-         - A moment of surrender. "Whatever happens, happens."
-         - Focus on emotional fulfillment mixed with physical intensity.
-
-      *** RETENTION STRATEGY (CTAs) ***
-      - Insert "Confessional Questions" to hook the audience.
-      - Example: "Have you ever felt a desire you couldn't control? Type '1' if you understand this feeling."
-      - Example: "Do you think I made a mistake? Type 'Yes' or 'No'. I really need your opinion."
     `
   },
   {
