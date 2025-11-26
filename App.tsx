@@ -295,8 +295,8 @@ function App() {
             onOpenSettings={() => setIsSettingsOpen(true)} 
             onOpenHistory={() => setIsHistoryOpen(true)}
             activeTab="new"
-            isAdmin={isAdmin}
             onOpenAdminPanel={() => setIsAdminOpen(true)}
+            currentAccount={currentAccount}
           />
 
           <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10 flex flex-col gap-8">
@@ -436,10 +436,13 @@ function App() {
             onClearAll={clearAllHistory}
           />
 
-          <AdminPanel 
-            isOpen={isAdminOpen}
-            onClose={() => setIsAdminOpen(false)}
-          />
+          {/* Security Guard: Only render AdminPanel if role is truly admin */}
+          {isAdmin && (
+              <AdminPanel 
+                isOpen={isAdminOpen}
+                onClose={() => setIsAdminOpen(false)}
+              />
+          )}
         </>
       ) : (
         <div className="relative min-h-screen bg-slate-900">
