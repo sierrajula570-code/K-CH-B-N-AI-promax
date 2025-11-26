@@ -59,6 +59,34 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
 
+// --- ARTIFACT CLEANER (FOR TTS) ---
+const cleanArtifacts = (text: string): string => {
+  if (!text) return "";
+  
+  let cleaned = text;
+
+  // 1. Remove Markdown headers and bold headers (e.g., **Part 1**, # Chapter 1)
+  cleaned = cleaned.replace(/^#+\s.*$/gm, ''); // Remove "# Header"
+  cleaned = cleaned.replace(/^\*\*.*(Part|Chapter|Phần|Chương|Intro|Outro).*\*\*[:\s]*$/gmi, ''); // Remove "**Part 1**"
+  cleaned = cleaned.replace(/^.*(Part|Chapter|Phần|Chương)\s+\d+[:\.]?\s*$/gmi, ''); // Remove "Part 1:" lines
+
+  // 2. Remove Labels (e.g., "Hook:", "Body:", "Conclusion:")
+  cleaned = cleaned.replace(/^(Hook|Intro|Body|Conclusion|Lời dẫn|Thân bài|Kết bài|Scene \d+):/gmi, '');
+  
+  // 3. Remove Brackets/Parentheses (often used for actions like [Music], (Sighs))
+  cleaned = cleaned.replace(/\[.*?\]/g, ''); 
+  cleaned = cleaned.replace(/\(.*?\)/g, ''); 
+
+  // 4. Remove Common AI Chaining Phrases
+  cleaned = cleaned.replace(/Here is the (next|continuation).*?:/gi, '');
+  cleaned = cleaned.replace(/Continuing from where we left off.*?/gi, '');
+
+  // 5. Cleanup Multiple Newlines to single/double
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  return cleaned.trim();
+};
+
 // --- PROMPT BUILDER (Unified) ---
 const buildSystemInstruction = (
   template: ScriptTemplate, 
@@ -153,8 +181,10 @@ const buildSystemInstruction = (
        - Each paragraph must have ONE clear main idea.
        - NO walls of text.
     
-    2. NO LISTS / NO BULLET POINTS:
+    2. NO LISTS / NO BULLET POINTS / NO HEADERS:
        - ABSOLUTELY NO using "-", "*", "1.", "2.".
+       - ABSOLUTELY NO "Chapter 1", "Part 1", "Intro", "Outro" headers.
+       - The output must be PURE SPOKEN TEXT.
        - Transform all lists into flowing narrative sentences.
     
     3. CLEAN AUDIO ONLY:
@@ -299,10 +329,14 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
         STRUCTURE:
         - Divide into logical "CHAPTERS" (but do not use headers).
         - Every 30 seconds (~500 chars), insert a "Mini-Hook" or curiosity gap.
-        REQUIREMENT: YOU MUST HIT AT LEAST ${config.minChars} CHARACTERS.
-        Expand on every point. Do not summarize.
+        
+        STRICT REQUIREMENT: 
+        - DO NOT output any structural labels like "Part 1" or "Chapter 1".
+        - The output must be continuous spoken text ready for TTS.
+        - YOU MUST HIT AT LEAST ${config.minChars} CHARACTERS.
       `;
-      return await executeCall(systemInstruction, userPrompt);
+      const rawText = await executeCall(systemInstruction, userPrompt);
+      return cleanArtifacts(rawText);
 
     } else {
       // --- CHAINED GENERATION ---
@@ -326,10 +360,14 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
             TOPIC: "${input}"
             INSTRUCTIONS:
             1. Start with a powerful HOOK.
-            2. Develop the first 1-2 CHAPTERS.
+            2. Develop the first 1-2 CHAPTERS/PARTS of the story.
             3. Paragraphs: 3-5 sentences. NO LISTS.
             4. END this part in the middle of a transition.
-            STRICT RULE: BE EXTREMELY VERBOSE.
+            
+            STRICT RULES: 
+            - DO NOT output "Part 1" header.
+            - Start directly with the story.
+            - BE EXTREMELY VERBOSE.
           `;
         } else {
           partPrompt = `
@@ -340,17 +378,17 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
             CONTEXT FROM PREVIOUS PART: "...${previousContext.slice(-500)}"
             CRITICAL SEAMLESS INSTRUCTIONS:
             1. START IMMEDIATELY where the context left off. 
-            2. DO NOT write an intro.
-            3. Maintain the "Chapter" structure.
+            2. DO NOT write an intro (No "Welcome back", No "Here is the next part").
+            3. DO NOT use headers like "Chapter 2".
+            4. Maintain the story flow.
             ${isLast ? "5. WRAP UP: Bring all threads to a Climax and then a thought-provoking Conclusion." : "5. End this part on a transition, ready for the next part."}
           `;
         }
 
         let partText = await executeCall(systemInstruction, partPrompt);
         
-        // Clean up common AI artifacts
-        partText = partText.replace(/^\*\*Part \d+\*\*[:\s]*/i, '').replace(/^Part \d+[:\s]*/i, '');
-        partText = partText.replace(/^[\*\-]\s/gm, '');
+        // --- CLEANING ARTIFACTS BEFORE APPENDING ---
+        partText = cleanArtifacts(partText);
 
         fullScript += (isFirst ? "" : " ") + partText;
         previousContext = partText;
