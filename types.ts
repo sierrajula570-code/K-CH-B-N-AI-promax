@@ -57,6 +57,13 @@ export interface GlobalKnowledgeItem {
   qualityScore?: number; // Điểm chất lượng (có thể thêm sau này)
 }
 
+// --- NEW: ANALYSIS DATA TYPE ---
+export interface ScriptAnalysis {
+  outline: string[]; // 7 steps
+  characters: string[]; // List of characters with roles
+  pacingNote: string;
+}
+
 // --- AI INTEGRAION TYPES ---
 export type AIProvider = 'google' | 'openai' | 'anthropic' | 'xai';
 

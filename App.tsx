@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { TEMPLATES, LANGUAGES, DURATIONS, PERSPECTIVES, AI_MODELS } from './constants'; 
-import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem, AIProvider } from './types';
+import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem, AIProvider, ScriptAnalysis } from './types';
 import Header from './components/Header';
 import InputSection from './components/InputSection';
 import TemplateSelector from './components/TemplateSelector';
 import ConfigSection from './components/ConfigSection';
 import ResultModal from './components/ResultModal';
+import ResultSection from './components/ResultSection';
 import SettingsModal from './components/SettingsModal';
 import HistoryModal from './components/HistoryModal';
 import AdminPanel from './components/AdminPanel';
@@ -14,14 +15,16 @@ import LoginModal from './components/LoginModal';
 import SignupModal from './components/SignupModal';
 import FirebaseConfigModal from './components/FirebaseConfigModal'; 
 import AdminAuthModal from './components/AdminAuthModal';
-import { universalGenerateScript, calculateTargetLength } from './services/universalAiService';
+import AnalysisModal from './components/AnalysisModal';
+import { universalGenerateScript, calculateTargetLength, analyzeScriptRequest } from './services/universalAiService';
 import { 
   getUserProfile,
   Account,
   logout,
   upgradeToAdmin,
   claimSession,
-  listenToAccountChanges
+  listenToAccountChanges,
+  isQuotaExceeded
 } from './services/accountService';
 import { 
   getHistory, 
@@ -34,7 +37,7 @@ import {
 import { fetchAppConfig } from './services/configService';
 import { auth, isConfigured } from './services/firebase'; 
 import { onAuthStateChanged, Unsubscribe } from 'firebase/auth';
-import { Zap, Loader2 } from 'lucide-react';
+import { Zap, Loader2, ScanSearch, ArrowDown, AlertTriangle, CloudOff } from 'lucide-react';
 
 function App() {
   // Auth State
@@ -44,9 +47,12 @@ function App() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Configuration State
   const [isFirebaseConfigOpen, setIsFirebaseConfigOpen] = useState(!isConfigured); 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   
   // App Config Data (Knowledge)
   const [templates, setTemplates] = useState<ScriptTemplate[]>(TEMPLATES);
@@ -71,208 +77,146 @@ function App() {
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-2.5-flash');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [generatedContent, setGeneratedContent] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  
+
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [targetStats, setTargetStats] = useState<{ min: number; max: number; target: number } | undefined>(undefined);
+  
+  // Analysis State
+  const [analysisResult, setAnalysisResult] = useState<ScriptAnalysis | null>(null);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
 
-  // Single Session Ref
-  const mySessionIdRef = useRef<string | null>(null);
-  const accountListenerRef = useRef<Unsubscribe | null>(null);
-
-  // --- Auth Initialization with Firebase ---
+  // Load App Config on Mount
   useEffect(() => {
-    if (!isConfigured) {
-      setIsCheckingAuth(false);
-      return; 
-    }
-
-    // 1. Fetch Dynamic Configuration
     const loadConfig = async () => {
-        const config = await fetchAppConfig();
-        setTemplates(config.templates);
-        setLanguages(config.languages);
-        setDurations(config.durations);
-        setPerspectives(config.perspectives);
-        
-        if(config.templates.length > 0) setSelectedTemplate(config.templates[0]);
-        if(config.languages.length > 0) setSelectedLanguage(config.languages[0]);
-        if(config.durations.length > 0) setSelectedDuration(config.durations[0]);
-        if(config.perspectives.length > 0) setSelectedPerspective(config.perspectives[0]);
+      const config = await fetchAppConfig();
+      if (config.templates.length > 0) setTemplates(config.templates);
+      if (config.languages.length > 0) setLanguages(config.languages);
+      if (config.durations.length > 0) setDurations(config.durations);
+      if (config.perspectives.length > 0) setPerspectives(config.perspectives);
+      
+      if (config.templates.length > 0 && selectedTemplate.id === 'general') {
+          // Keep selection logic roughly safe
+      }
     };
     loadConfig();
+  }, []);
 
-    // 2. Auth State Listener
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setIsCheckingAuth(true);
-      
-      // Clear previous listener if any (e.g. user switch)
-      if (accountListenerRef.current) {
-        accountListenerRef.current();
-        accountListenerRef.current = null;
-      }
+  // Auth Listener
+  useEffect(() => {
+    let unsubscribeUser: Unsubscribe | undefined;
 
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      setAuthError(null);
       if (user) {
-        const profile = await getUserProfile(user.uid);
-        if (profile) {
-           if (!profile.isActive && profile.role !== 'admin') {
-             setCurrentAccount(null);
-             setIsLoginOpen(true);
-           } else if (profile.expiresAt !== null && Date.now() > profile.expiresAt) {
-             alert("Tài khoản đã hết hạn.");
-             await logout();
-             setCurrentAccount(null);
-             setIsLoginOpen(true);
-           } else {
-             setCurrentAccount(profile);
-             setIsLoginOpen(false);
-             loadCloudHistory(profile.id);
-
-             // --- SINGLE SESSION ENFORCEMENT ---
-             // 1. Claim this session (Update DB)
-             const newSessionId = await claimSession(user.uid);
-             mySessionIdRef.current = newSessionId;
-
-             // 2. Listen to DB changes to see if we get kicked
-             const unsubListener = listenToAccountChanges(user.uid, (updatedProfile) => {
-               if (!updatedProfile) return; // Deleted
-
-               // Check if session ID changed on server and differs from ours
-               if (updatedProfile.currentSessionId && updatedProfile.currentSessionId !== mySessionIdRef.current) {
-                 // Someone else logged in!
-                 alert("⚠️ PHÁT HIỆN ĐĂNG NHẬP KHÁC\n\nTài khoản của bạn vừa được đăng nhập trên một thiết bị khác. Phiên làm việc này sẽ bị đăng xuất.");
-                 logout();
-                 window.location.reload();
-               }
+        try {
+            const profile = await getUserProfile(user.uid);
+            
+            if (profile) {
+               setCurrentAccount(profile);
                
-               // Also check if account is locked or expired in real-time
-               if (!updatedProfile.isActive) {
-                   alert("Tài khoản của bạn đã bị KHÓA bởi quản trị viên.");
-                   logout();
-                   window.location.reload();
-               }
+               // Listen for realtime changes
+               unsubscribeUser = listenToAccountChanges(user.uid, (updatedProfile) => {
+                  if (!updatedProfile) {
+                     // Account deleted
+                  } else {
+                     setCurrentAccount(updatedProfile);
+                     claimSession(user.uid);
+                  }
+               });
                
-               // Update local state to reflect role changes etc.
-               setCurrentAccount(updatedProfile);
-             });
-             
-             accountListenerRef.current = unsubListener;
-           }
-        } else {
-          setCurrentAccount(null);
-          setIsLoginOpen(true); 
+               // Load history
+               const historyData = await getHistory(user.uid);
+               setHistory(historyData);
+            } else {
+               // Profile is null. Either Quota or DB Error.
+               console.warn("Authentication successful, but Profile Load failed (Offline/Quota Mode).");
+               setAuthError("Hệ thống Database đang bảo trì (Quota). Bạn vẫn có thể dùng AI bình thường, nhưng Lịch sử sẽ không được lưu.");
+               setCurrentAccount(null); // Treat as guest visually
+            }
+        } catch (e) {
+            console.error("Auth Init Error:", e);
+            setCurrentAccount(null);
         }
       } else {
         setCurrentAccount(null);
         setHistory([]);
-        setIsLoginOpen(true);
-        mySessionIdRef.current = null;
+        if (unsubscribeUser) unsubscribeUser();
       }
       setIsCheckingAuth(false);
     });
 
     return () => {
-      unsubscribe();
-      if (accountListenerRef.current) accountListenerRef.current();
+      unsubscribeAuth();
+      if (unsubscribeUser) unsubscribeUser();
     };
   }, []);
 
-  // --- History Logic ---
-  const loadCloudHistory = async (uid: string) => {
-    const cloudHistory = await getHistory(uid);
-    setHistory(cloudHistory);
-  };
-
-  const saveToHistory = async (content: string) => {
-    if (!content || content.startsWith('⚠️')) return;
+  const handleAnalyze = async () => {
+    // Allow guest mode if quota exceeded, as long as API key exists
+    const hasApiKey = localStorage.getItem('gemini_api_key') || process.env.API_KEY;
+    if (!currentAccount && !hasApiKey && !authError) {
+        setIsLoginOpen(true);
+        return;
+    }
     
-    // 1. Lưu vào kho chung (Global Warehouse)
-    await saveToGlobalKnowledge(
-        inputText,
-        content,
-        selectedTemplate.id,
-        selectedLanguage.id
-    );
-
-    // 2. Lưu vào lịch sử cá nhân (nếu đã đăng nhập)
-    if (!currentAccount) return;
-
-    const newItem: HistoryItem = {
-      id: Date.now().toString(),
-      userId: currentAccount.id,
-      timestamp: Date.now(),
-      templateId: selectedTemplate.id, // Lưu lại Template ID để AI sau này học
-      templateTitle: selectedTemplate.title,
-      inputPreview: inputText.substring(0, 50) + (inputText.length > 50 ? '...' : ''),
-      content: content
-    };
-
-    setHistory(prev => [newItem, ...prev]);
-    await saveToFirestore(currentAccount.id, newItem);
-  };
-
-  const deleteHistoryItem = async (id: string) => {
-    if (!currentAccount) return;
-    setHistory(prev => prev.filter(item => item.id !== id));
-    await deleteFromFirestore(currentAccount.id, id);
-  };
-  
-  const clearAllHistory = async () => {
-    if (!currentAccount) return;
-    if(confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử CÁ NHÂN?\nDữ liệu đã đóng góp vào Kho tri thức chung sẽ KHÔNG bị xóa.")) {
-        setHistory([]);
-        await clearFirestoreHistory(currentAccount.id);
-    }
-  }
-
-  // --- Generation Logic ---
-  const handleGenerate = async () => {
     if (!inputText.trim()) {
-      alert("Vui lòng nhập ý tưởng hoặc nội dung.");
-      return;
+        alert("Vui lòng nhập nội dung hoặc ý tưởng!");
+        return;
     }
 
-    setIsLoading(true);
-    setTargetStats(undefined);
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
 
     try {
-      const stats = calculateTargetLength(selectedLanguage.id, selectedDuration.id, customMinutes);
-      setTargetStats({
-        min: stats.minChars,
-        max: stats.maxChars,
-        target: stats.targetChars
-      });
+        const apiKeys = {
+            googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || undefined,
+            openaiApiKey: localStorage.getItem('openai_api_key') || undefined,
+            anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || undefined,
+            xaiApiKey: localStorage.getItem('kb_xai_api_key') || undefined
+        };
 
-      // --- AUTO LEARNING RETRIEVAL ---
-      // Lấy các bài viết cũ của User cho mẫu này để AI học
-      let learnedExamples: string[] = [];
-      if (currentAccount) {
-         learnedExamples = await getRecentHistoryByTemplate(currentAccount.id, selectedTemplate.id);
-         if (learnedExamples.length > 0) {
-             console.log(">> AI Auto-Learning: Retrieved " + learnedExamples.length + " previous scripts.");
-         }
-      }
+        const result = await analyzeScriptRequest({
+            provider: selectedProvider,
+            model: selectedModelId,
+            input: inputText,
+            template: selectedTemplate,
+            language: selectedLanguage,
+            duration: selectedDuration,
+            mode: inputMode,
+            perspective: selectedPerspective,
+            apiKeys
+        });
 
-      // --- MEMORY RETRIEVAL STRATEGY ---
-      const specificContext = currentAccount?.templateContexts?.[selectedTemplate.id];
-      const globalContext = currentAccount?.personalContext;
-      
-      const finalContext = (specificContext && specificContext.trim().length > 0) 
-                           ? specificContext 
-                           : (globalContext || "");
+        setAnalysisResult(result);
+        setIsAnalysisModalOpen(true);
 
-      // Load Keys
-      const apiKeys = {
-        googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || '',
-        openaiApiKey: localStorage.getItem('openai_api_key') || '',
-        anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || '',
-        xaiApiKey: localStorage.getItem('kb_xai_api_key') || ''
-      };
-      
-      const result = await universalGenerateScript({
+    } catch (e: any) {
+        alert("Lỗi khi phân tích: " + e.message);
+    } finally {
+        setIsAnalyzing(false);
+    }
+  };
+
+  const handleGenerateFromAnalysis = async (approvedAnalysis: ScriptAnalysis) => {
+    setIsAnalysisModalOpen(false);
+    setIsLoading(true);
+    setGeneratedContent(null);
+
+    let learnedExamples: string[] = [];
+    if (currentAccount && !isQuotaExceeded) {
+       learnedExamples = await getRecentHistoryByTemplate(currentAccount.id, selectedTemplate.id);
+    }
+
+    const apiKeys = {
+        googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || undefined,
+        openaiApiKey: localStorage.getItem('openai_api_key') || undefined,
+        anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || undefined,
+        xaiApiKey: localStorage.getItem('kb_xai_api_key') || undefined
+    };
+
+    const result = await universalGenerateScript({
         provider: selectedProvider,
         model: selectedModelId,
         input: inputText,
@@ -281,248 +225,281 @@ function App() {
         duration: selectedDuration,
         mode: inputMode,
         perspective: selectedPerspective,
-        customMinutes: customMinutes,
+        customMinutes,
         persona: selectedPersona,
-        personalContext: finalContext,
-        learnedExamples: learnedExamples, // Nạp bài cũ vào để AI bắt chước
-        apiKeys: apiKeys
-      });
-      
-      setGeneratedContent(result);
-      await saveToHistory(result); 
-      setIsModalOpen(true);
-    } catch (error) {
-      console.error(error);
-      alert("Có lỗi xảy ra, vui lòng thử lại.");
-    } finally {
-      setIsLoading(false);
+        personalContext: currentAccount?.personalContext,
+        learnedExamples,
+        approvedAnalysis, 
+        apiKeys
+    });
+
+    setGeneratedContent(result);
+
+    // Save History if possible
+    if (currentAccount && !result.startsWith('⚠️')) {
+        const newItem: HistoryItem = {
+            id: Date.now().toString(),
+            userId: currentAccount.id,
+            timestamp: Date.now(),
+            templateId: selectedTemplate.id,
+            templateTitle: selectedTemplate.title,
+            inputPreview: inputText.substring(0, 50) + '...',
+            content: result
+        };
+        
+        const saved = await saveToFirestore(currentAccount.id, newItem);
+        if (saved) {
+            setHistory(prev => [newItem, ...prev]);
+        }
+
+        await saveToGlobalKnowledge(inputText, result, selectedTemplate.id, selectedLanguage.id);
+    }
+    
+    setIsLoading(false);
+  };
+
+  const handleDeleteHistory = async (id: string) => {
+    if (!currentAccount) return;
+    if (confirm("Bạn có chắc chắn muốn xóa?")) {
+       await deleteFromFirestore(currentAccount.id, id);
+       setHistory(prev => prev.filter(item => item.id !== id));
     }
   };
 
-  const handleOpenHistoryItem = (content: string) => {
-    setGeneratedContent(content);
-    setTargetStats(undefined);
-    setIsHistoryOpen(false);
-    setIsModalOpen(true);
+  const handleClearHistory = async () => {
+    if (!currentAccount) return;
+    if (confirm("Xóa toàn bộ lịch sử? Hành động này không thể hoàn tác.")) {
+        await clearFirestoreHistory(currentAccount.id);
+        setHistory([]);
+    }
   };
 
-  const handleLoginSuccess = (account: Account) => {
-    setCurrentAccount(account);
-    setIsLoginOpen(false);
-    loadCloudHistory(account.id);
-  };
-
-  if (isFirebaseConfigOpen) {
-      return (
-          <FirebaseConfigModal 
-              isOpen={true} 
-              onClose={() => {
-                  if (isConfigured) setIsFirebaseConfigOpen(false);
-              }} 
-          />
-      );
-  }
-
-  if (isCheckingAuth) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin mr-3" />
-        Đang tải dữ liệu...
-      </div>
-    );
-  }
-
-  const isAdmin = currentAccount?.role === 'admin';
+  const targetLength = calculateTargetLength(selectedLanguage.id, selectedDuration.id, customMinutes);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {currentAccount ? (
-        <>
-          <Header 
-            onOpenSettings={() => setIsSettingsOpen(true)} 
-            onOpenHistory={() => setIsHistoryOpen(true)}
-            activeTab="new"
-            onOpenAdminPanel={() => setIsAdminOpen(true)}
-            currentAccount={currentAccount}
-          />
-
-          <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10 flex flex-col gap-8">
-            <section>
-              <InputSection 
-                value={inputText} 
-                onChange={setInputText}
-                mode={inputMode}
-                setMode={setInputMode}
-              />
-            </section>
-
-            <section>
-              <TemplateSelector 
-                templates={templates}
-                selectedTemplateId={selectedTemplate.id}
-                onSelect={setSelectedTemplate}
-              />
-            </section>
-
-            <section>
-              <ConfigSection 
-                languages={languages}
-                durations={durations}
-                perspectives={perspectives}
-                selectedTemplateId={selectedTemplate.id}
-                selectedLanguage={selectedLanguage.id}
-                onSelectLanguage={setSelectedLanguage}
-                selectedDuration={selectedDuration.id}
-                onSelectDuration={setSelectedDuration}
-                customMinutes={customMinutes}
-                setCustomMinutes={setCustomMinutes}
-                selectedPerspective={selectedPerspective.id}
-                onSelectPerspective={setSelectedPerspective}
-                selectedPersona={selectedPersona}
-                onSelectPersona={setSelectedPersona}
-                // AI Props
-                selectedProvider={selectedProvider}
-                onSelectProvider={setSelectedProvider}
-                selectedModelId={selectedModelId}
-                onSelectModelId={setSelectedModelId}
-              />
-            </section>
-          </main>
-
-          <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 p-4 z-40 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
-            <div className="max-w-6xl mx-auto flex items-center justify-between">
-                <div className="hidden md:flex items-center gap-3 text-sm text-slate-500">
-                    <div className="bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                      <span className="font-bold text-slate-800">{inputText.length}</span> ký tự
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>•</span>
-                      <span className="font-medium text-primary-700">{selectedTemplate.title}</span>
-                      <span>•</span>
-                      <span className={`font-bold ${
-                        selectedProvider === 'openai' ? 'text-green-600' : 
-                        selectedProvider === 'anthropic' ? 'text-orange-600' :
-                        selectedProvider === 'xai' ? 'text-slate-900' :
-                        'text-blue-600'
-                      }`}>
-                        {AI_MODELS.find(m => m.id === selectedModelId)?.name || selectedModelId}
-                      </span>
-                    </div>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20">
+      <Header 
+        onOpenSettings={() => setIsSettingsOpen(true)} 
+        onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenAdminPanel={() => setIsAdminOpen(true)}
+        currentAccount={currentAccount}
+      />
+      
+      <main className="max-w-4xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-10">
+        
+        {/* Auth Warning or Quota Warning */}
+        {authError && (
+             <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
+                <CloudOff className="w-5 h-5 text-amber-600" />
+                <div>
+                   <p className="font-bold text-sm">Chế độ Offline / Giới hạn</p>
+                   <p className="text-xs">{authError}</p>
                 </div>
-                
-                <button
-                    onClick={handleGenerate}
-                    disabled={isLoading || !inputText.trim()}
-                    className={`
-                        flex items-center justify-center gap-2 px-10 py-3.5 rounded-2xl font-extrabold text-white text-lg w-full md:w-auto transition-all duration-300 shadow-xl
-                        ${isLoading || !inputText.trim() 
-                            ? 'bg-slate-300 cursor-not-allowed shadow-none' 
-                            : 'bg-gradient-to-r from-primary-600 to-secondary-600 hover:from-primary-500 hover:to-secondary-500 hover:-translate-y-1 hover:shadow-glow'
-                        }
-                    `}
-                >
-                    {isLoading ? (
-                        <>
-                            <Loader2 className="w-6 h-6 animate-spin" />
-                            <span>Đang phân tích & viết...</span>
-                        </>
-                    ) : (
-                        <>
-                            <Zap className="w-6 h-6 fill-current animate-pulse" />
-                            TẠO KỊCH BẢN NGAY
-                        </>
-                    )}
-                </button>
+             </div>
+        )}
+
+        {isConfigured && !isCheckingAuth && !currentAccount && !authError && (
+           <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-4">
+              <div className="flex items-center gap-3">
+                 <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
+                    <Zap className="w-5 h-5 text-yellow-300 fill-yellow-300" />
+                 </div>
+                 <div>
+                    <h3 className="font-bold text-lg">Chào mừng bạn đến với Kichban AI Pro Max!</h3>
+                    <p className="text-white/90 text-sm">Đăng nhập để lưu lịch sử, mở khóa tính năng tự học và quản lý Prompt cá nhân.</p>
+                 </div>
+              </div>
+              <button 
+                onClick={() => setIsLoginOpen(true)}
+                className="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition shadow-md active:scale-95 whitespace-nowrap"
+              >
+                Đăng nhập ngay
+              </button>
+           </div>
+        )}
+
+        {/* 1. INPUT SECTION (TOP & BIG) */}
+        <section className="animate-in fade-in slide-in-from-top-4 duration-500">
+           <InputSection 
+              value={inputText}
+              onChange={setInputText}
+              mode={inputMode}
+              setMode={setInputMode}
+            />
+        </section>
+
+        {/* 2. TEMPLATE SELECTOR */}
+        <section className="animate-in fade-in slide-in-from-top-8 duration-500 delay-100">
+            <TemplateSelector 
+              templates={templates}
+              selectedTemplateId={selectedTemplate.id}
+              onSelect={setSelectedTemplate}
+            />
+        </section>
+
+        {/* 3. CONFIG SECTION */}
+        <section className="animate-in fade-in slide-in-from-top-8 duration-500 delay-200">
+            <ConfigSection 
+              languages={languages}
+              durations={durations}
+              perspectives={perspectives}
+              
+              selectedTemplateId={selectedTemplate.id}
+              selectedLanguage={selectedLanguage.id}
+              onSelectLanguage={(l) => {
+                  const lang = languages.find(la => la.id === l.id) || LANGUAGES[0];
+                  setSelectedLanguage(lang);
+              }}
+              selectedDuration={selectedDuration.id}
+              onSelectDuration={(d) => {
+                  const dur = durations.find(du => du.id === d.id) || DURATIONS[0];
+                  setSelectedDuration(dur);
+              }}
+              customMinutes={customMinutes}
+              setCustomMinutes={setCustomMinutes}
+              selectedPerspective={selectedPerspective.id}
+              onSelectPerspective={(p) => {
+                  const persp = perspectives.find(pe => pe.id === p.id) || PERSPECTIVES[0];
+                  setSelectedPerspective(persp);
+              }}
+              selectedPersona={selectedPersona}
+              onSelectPersona={setSelectedPersona}
+
+              selectedProvider={selectedProvider}
+              onSelectProvider={setSelectedProvider}
+              selectedModelId={selectedModelId}
+              onSelectModelId={setSelectedModelId}
+            />
+        </section>
+
+        {/* 4. ACTION BUTTON */}
+        <div className="flex flex-col items-center justify-center gap-4 animate-in fade-in zoom-in duration-300 delay-300">
+            <div className="flex flex-col items-center animate-bounce text-slate-400">
+                <ArrowDown className="w-5 h-5" />
             </div>
-          </div>
-
-          <ResultModal 
-            isOpen={isModalOpen}
-            onClose={() => setIsModalOpen(false)}
-            content={generatedContent || ''}
-            targetLength={targetStats}
-          />
-
-          <SettingsModal 
-            isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
-            onOpenFirebaseConfig={() => {
-                setIsFirebaseConfigOpen(true);
-                setIsSettingsOpen(false);
-            }}
-            onOpenAdminAuth={() => {
-               setIsSettingsOpen(false);
-               setIsAdminAuthOpen(true);
-            }}
-            currentAccount={currentAccount}
-            selectedTemplate={selectedTemplate}
-          />
-
-          <AdminAuthModal 
-            isOpen={isAdminAuthOpen}
-            onClose={() => setIsAdminAuthOpen(false)}
-            onSuccess={async () => {
-              if (currentAccount) {
-                 const success = await upgradeToAdmin(currentAccount.id);
-                 if (success) {
-                   alert("Đã nâng cấp quyền Admin thành công! Vui lòng tải lại trang.");
-                   window.location.reload();
-                 } else {
-                   alert("Có lỗi xảy ra khi nâng cấp quyền.");
-                 }
-              }
-            }}
-          />
-
-          <HistoryModal
-            isOpen={isHistoryOpen}
-            onClose={() => setIsHistoryOpen(false)}
-            history={history}
-            onDelete={deleteHistoryItem}
-            onSelect={handleOpenHistoryItem}
-            onClearAll={clearAllHistory}
-          />
-
-          {/* Security Guard: Only render AdminPanel if role is truly admin */}
-          {isAdmin && (
-              <AdminPanel 
-                isOpen={isAdminOpen}
-                onClose={() => setIsAdminOpen(false)}
-              />
-          )}
-        </>
-      ) : (
-        <div className="relative min-h-screen bg-slate-900">
-          <LoginModal 
-            isOpen={isLoginOpen && !isSignupOpen && !isFirebaseConfigOpen}
-            onClose={() => {}} 
-            onSuccess={handleLoginSuccess}
-            onOpenSignup={() => {
-              setIsLoginOpen(false);
-              setIsSignupOpen(true);
-            }}
-          />
-          <SignupModal 
-            isOpen={isSignupOpen}
-            onClose={() => {
-              setIsSignupOpen(false);
-              setIsLoginOpen(true); 
-            }}
-            onSuccess={() => {
-              setIsSignupOpen(false);
-              setIsLoginOpen(true);
-              alert('Đăng ký thành công! Vui lòng đợi Quản trị viên kích hoạt.');
-            }}
-          />
+            <button
+                onClick={handleAnalyze} 
+                disabled={isLoading || isAnalyzing}
+                className={`
+                w-full max-w-md py-5 rounded-2xl font-extrabold text-xl text-white shadow-2xl shadow-primary-500/40 transition-all transform hover:-translate-y-1 active:scale-95 flex items-center justify-center gap-3
+                ${isLoading || isAnalyzing 
+                    ? 'bg-slate-400 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-primary-600 via-primary-500 to-secondary-500 hover:shadow-primary-500/60 ring-4 ring-primary-100'
+                }
+                `}
+            >
+                {isLoading ? (
+                <>
+                    <Loader2 className="w-7 h-7 animate-spin" />
+                    <span>Đang viết kịch bản...</span>
+                </>
+                ) : isAnalyzing ? (
+                <>
+                    <ScanSearch className="w-7 h-7 animate-pulse" />
+                    <span>Đang phân tích ý tưởng...</span>
+                </>
+                ) : (
+                <>
+                    <Zap className="w-7 h-7 fill-current" />
+                    <span>PHÂN TÍCH & TẠO KỊCH BẢN</span>
+                </>
+                )}
+            </button>
+            <p className="text-xs text-slate-400 font-medium">
+                * Hệ thống sẽ phân tích cấu trúc trước khi viết chi tiết.
+            </p>
         </div>
-      )}
 
-      {isFirebaseConfigOpen && (
-          <FirebaseConfigModal 
-              isOpen={true}
-              onClose={() => setIsFirebaseConfigOpen(false)}
+        {/* 5. RESULT SECTION */}
+        {generatedContent && (
+             <div className="pt-8 border-t border-slate-200">
+                <ResultSection content={generatedContent} />
+             </div>
+        )}
+
+      </main>
+
+      {/* MODALS */}
+      <LoginModal 
+        isOpen={isLoginOpen} 
+        onClose={() => setIsLoginOpen(false)} 
+        onSuccess={(acc) => {
+            setCurrentAccount(acc);
+            setIsLoginOpen(false);
+        }}
+        onOpenSignup={() => {
+            setIsLoginOpen(false);
+            setIsSignupOpen(true);
+        }}
+      />
+
+      <SignupModal
+        isOpen={isSignupOpen}
+        onClose={() => setIsSignupOpen(false)}
+        onSuccess={() => {
+            alert("Đăng ký thành công! Vui lòng chờ Admin duyệt.");
+            setIsSignupOpen(false);
+        }}
+      />
+      
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)}
+        onOpenFirebaseConfig={() => setIsFirebaseConfigOpen(true)}
+        onOpenAdminAuth={() => setIsAdminAuthOpen(true)}
+        currentAccount={currentAccount}
+        selectedTemplate={selectedTemplate}
+      />
+
+      <ResultModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)}
+        content={generatedContent || ''}
+        targetLength={{ min: targetLength.minChars, max: targetLength.maxChars, target: targetLength.targetChars }}
+      />
+      
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={history}
+        onDelete={handleDeleteHistory}
+        onSelect={(content) => {
+            setGeneratedContent(content);
+            setIsModalOpen(true);
+            setIsHistoryOpen(false);
+        }}
+        onClearAll={handleClearHistory}
+      />
+      
+      <AdminPanel 
+        isOpen={isAdminOpen} 
+        onClose={() => setIsAdminOpen(false)} 
+      />
+
+      <AdminAuthModal 
+        isOpen={isAdminAuthOpen}
+        onClose={() => setIsAdminAuthOpen(false)}
+        onSuccess={() => {
+             if (currentAccount) upgradeToAdmin(currentAccount.id);
+             alert("Đã mở khóa quyền Admin (Owner Mode)!");
+             window.location.reload();
+        }}
+      />
+      
+      <FirebaseConfigModal 
+        isOpen={isFirebaseConfigOpen}
+        onClose={() => setIsFirebaseConfigOpen(false)}
+      />
+
+      {analysisResult && (
+          <AnalysisModal 
+            isOpen={isAnalysisModalOpen}
+            onClose={() => setIsAnalysisModalOpen(false)}
+            analysis={analysisResult}
+            onConfirm={handleGenerateFromAnalysis}
           />
       )}
+
     </div>
   );
 }

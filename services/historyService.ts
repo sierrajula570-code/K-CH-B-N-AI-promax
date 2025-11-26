@@ -10,87 +10,96 @@ import {
   orderBy,
   writeBatch,
   addDoc,
-  where,
-  limit
+  where
 } from 'firebase/firestore';
 import { HistoryItem, GlobalKnowledgeItem } from '../types';
+import { checkGlobalQuota, setGlobalQuotaExceeded } from './accountService'; 
 
 const USERS_COLLECTION = 'users';
 const HISTORY_SUBCOLLECTION = 'history';
-const GLOBAL_KNOWLEDGE_COLLECTION = 'global_training_data'; // Kho dữ liệu chung không thể xóa
-
-// --- USER PRIVATE HISTORY ---
+const GLOBAL_KNOWLEDGE_COLLECTION = 'global_training_data'; 
 
 export const saveHistoryItem = async (uid: string, item: HistoryItem): Promise<boolean> => {
+  if (checkGlobalQuota()) return false; 
+
   try {
     const docRef = doc(db, USERS_COLLECTION, uid, HISTORY_SUBCOLLECTION, item.id);
     await setDoc(docRef, item);
     return true;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     console.error("Save History Error:", e);
     return false;
   }
 };
 
 export const getHistory = async (uid: string): Promise<HistoryItem[]> => {
+  if (checkGlobalQuota()) return [];
+
   try {
     const historyRef = collection(db, USERS_COLLECTION, uid, HISTORY_SUBCOLLECTION);
-    const q = query(historyRef, orderBy('timestamp', 'desc'));
+    // Sort client side usually if index missing, but here we try basic query
+    const q = query(historyRef); // Remove orderBy if it causes issues, but quota is main concern
     const querySnapshot = await getDocs(q);
     
     const items: HistoryItem[] = [];
     querySnapshot.forEach((doc) => {
       items.push(doc.data() as HistoryItem);
     });
+    // Sort client side
+    items.sort((a, b) => b.timestamp - a.timestamp);
+    
     return items;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     console.error("Get History Error:", e);
     return [];
   }
 };
 
-// --- NEW FUNCTION: AI AUTO-LEARNING RETRIEVAL ---
-// Lấy 2 bài viết gần nhất CÙNG MẪU KỊCH BẢN để AI học phong cách
 export const getRecentHistoryByTemplate = async (uid: string, templateId: string): Promise<string[]> => {
+  if (checkGlobalQuota()) return [];
+
   try {
     const historyRef = collection(db, USERS_COLLECTION, uid, HISTORY_SUBCOLLECTION);
-    // Lấy 2 bài gần nhất của template này
-    const q = query(
-      historyRef, 
-      where('templateId', '==', templateId),
-      orderBy('timestamp', 'desc'),
-      limit(2)
-    );
+    const q = query(historyRef, where('templateId', '==', templateId));
     
     const querySnapshot = await getDocs(q);
-    const examples: string[] = [];
+    const items: HistoryItem[] = [];
     
     querySnapshot.forEach((doc) => {
-      const data = doc.data() as HistoryItem;
-      if (data.content && data.content.length > 200) {
-        // Chỉ lấy 1500 ký tự đầu tiên để tiết kiệm token cho AI, đủ để học Hook và Intro
-        examples.push(data.content.substring(0, 1500));
-      }
+      items.push(doc.data() as HistoryItem);
     });
+
+    items.sort((a, b) => b.timestamp - a.timestamp);
+
+    const examples: string[] = [];
+    for (const item of items.slice(0, 2)) {
+      if (item.content && item.content.length > 200) {
+        examples.push(item.content.substring(0, 1500));
+      }
+    }
     
     return examples;
-  } catch (e) {
-    console.warn("AI Learning Fetch Error (Firestore Index might be missing yet):", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return [];
   }
 };
 
 export const deleteHistoryItem = async (uid: string, itemId: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     await deleteDoc(doc(db, USERS_COLLECTION, uid, HISTORY_SUBCOLLECTION, itemId));
     return true;
-  } catch (e) {
-    console.error("Delete History Error:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
 export const clearHistory = async (uid: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     const historyRef = collection(db, USERS_COLLECTION, uid, HISTORY_SUBCOLLECTION);
     const snapshot = await getDocs(historyRef);
@@ -102,13 +111,11 @@ export const clearHistory = async (uid: string): Promise<boolean> => {
     
     await batch.commit();
     return true;
-  } catch (e) {
-    console.error("Clear History Error:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
-
-// --- GLOBAL KNOWLEDGE BASE (IMMUTABLE WAREHOUSE) ---
 
 export const saveToGlobalKnowledge = async (
     input: string, 
@@ -116,6 +123,8 @@ export const saveToGlobalKnowledge = async (
     templateId: string, 
     languageId: string
 ): Promise<void> => {
+    if (checkGlobalQuota()) return;
+
     try {
         const item: GlobalKnowledgeItem = {
             id: Date.now().toString(),
@@ -126,12 +135,8 @@ export const saveToGlobalKnowledge = async (
             timestamp: Date.now()
         };
         
-        // Lưu vào collection chung. Collection này không có hàm delete được expose cho Client.
-        // Chỉ Admin truy cập trực tiếp Firestore mới xóa được.
         await addDoc(collection(db, GLOBAL_KNOWLEDGE_COLLECTION), item);
-        console.log(">> Data saved to Global Knowledge Warehouse.");
-    } catch (e) {
-        // Silent fail: Không làm phiền người dùng nếu việc lưu training data thất bại
-        console.warn("Failed to save to Global Knowledge:", e);
+    } catch (e: any) {
+        if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     }
 };

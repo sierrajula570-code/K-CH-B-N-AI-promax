@@ -21,38 +21,83 @@ import {
 export type AccountRole = 'admin' | 'user';
 
 export interface Account {
-  id: string; // Firebase UID
-  username: string; // Trong Firebase Auth là email, nhưng ta map field này để hiển thị
+  id: string; 
+  username: string; 
   email: string;
   role: AccountRole;
   expiresAt: number | null; 
   createdAt: number;
   isActive: boolean;
-  personalContext?: string; // Dữ liệu ngữ cảnh chung (Global)
-  templateContexts?: Record<string, string>; // Dữ liệu ngữ cảnh riêng cho từng Template ID
-  currentSessionId?: string; // ID phiên đăng nhập hiện tại (Single Device Check)
+  personalContext?: string; 
+  templateContexts?: Record<string, string>; 
+  currentSessionId?: string; 
 }
 
 const USERS_COLLECTION = 'users';
+
+// QUOTA MANAGEMENT
+const QUOTA_KEY = 'firebase_quota_exceeded_ts';
+const QUOTA_TIMEOUT = 60 * 60 * 1000; // 1 hour
+
+export const checkGlobalQuota = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const ts = localStorage.getItem(QUOTA_KEY);
+  if (ts) {
+    if (Date.now() - parseInt(ts) < QUOTA_TIMEOUT) {
+      return true;
+    } else {
+      localStorage.removeItem(QUOTA_KEY);
+      return false;
+    }
+  }
+  return false;
+};
+
+export const setGlobalQuotaExceeded = () => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(QUOTA_KEY, Date.now().toString());
+    console.warn("🚫 Global Quota Lock Activated for 1 hour.");
+};
+
+export let isQuotaExceeded = checkGlobalQuota();
 
 // --- Helpers ---
 
 // Lấy thông tin user profile từ Firestore dựa trên UID
 export const getUserProfile = async (uid: string): Promise<Account | null> => {
+  if (checkGlobalQuota()) return null;
+
+  // Cache Check (SessionStorage)
+  const CACHE_KEY = `user_profile_${uid}`;
+  if (typeof sessionStorage !== 'undefined') {
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) {
+          return JSON.parse(cached) as Account;
+      }
+  }
+
   try {
     const docRef = doc(db, USERS_COLLECTION, uid);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      return docSnap.data() as Account;
+      const data = docSnap.data() as Account;
+      if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      }
+      return data;
     }
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Error fetching user profile:", e);
+    if (e.code === 'resource-exhausted') {
+        setGlobalQuotaExceeded();
+    }
     return null;
   }
 };
 
 export const getAccounts = async (): Promise<Account[]> => {
+  if (checkGlobalQuota()) return [];
   try {
     const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
     const accounts: Account[] = [];
@@ -60,7 +105,8 @@ export const getAccounts = async (): Promise<Account[]> => {
       accounts.push(doc.data() as Account);
     });
     return accounts;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     console.error("Error getting accounts:", e);
     return [];
   }
@@ -68,35 +114,66 @@ export const getAccounts = async (): Promise<Account[]> => {
 
 // --- SINGLE DEVICE SESSION MANAGEMENT ---
 
-// Hàm này đánh dấu thiết bị hiện tại là "Chủ sở hữu phiên"
 export const claimSession = async (uid: string): Promise<string> => {
+  if (checkGlobalQuota()) return "skipped-quota";
+
+  // WRITE OPTIMIZATION: Use localStorage + Timestamp to limit writes to once per 30 mins
+  const SESSION_KEY = `session_claimed_${uid}_ts`;
+  const lastClaim = localStorage.getItem(SESSION_KEY);
+  
+  if (lastClaim && Date.now() - parseInt(lastClaim) < 30 * 60 * 1000) {
+      return "skipped-cached";
+  }
+
   try {
     const newSessionId = Date.now().toString() + Math.random().toString().slice(2, 8);
     await updateDoc(doc(db, USERS_COLLECTION, uid), {
       currentSessionId: newSessionId
     });
+    
+    localStorage.setItem(SESSION_KEY, Date.now().toString());
     return newSessionId;
-  } catch (e) {
-    console.error("Error claiming session:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return "";
   }
 };
 
-// Hàm lắng nghe thay đổi Real-time của User (để phát hiện bị kick hoặc hết hạn)
+// Hàm lắng nghe thay đổi Real-time của User
 export const listenToAccountChanges = (uid: string, callback: (account: Account | null) => void) => {
-  return onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
-    if (docSnap.exists()) {
-      callback(docSnap.data() as Account);
-    } else {
-      callback(null); // Tài khoản bị xóa
-    }
-  });
+  if (checkGlobalQuota()) return () => {};
+
+  try {
+      return onSnapshot(doc(db, USERS_COLLECTION, uid), 
+        (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data() as Account;
+                const CACHE_KEY = `user_profile_${uid}`;
+                if (typeof sessionStorage !== 'undefined') {
+                    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+                }
+                callback(data);
+            } else {
+                callback(null); 
+            }
+        }, 
+        (error) => {
+            console.warn("Listen Account Error:", error);
+            if (error.code === 'resource-exhausted') {
+                setGlobalQuotaExceeded();
+            }
+        }
+      );
+  } catch (e) {
+      console.warn("Setup Listen Error:", e);
+      return () => {};
+  }
 };
 
 // --- Core Logic ---
 
-// User Self-Registration
 export const signup = async (username: string, password: string): Promise<{ ok: boolean; error?: string; account?: Account }> => {
+  if (checkGlobalQuota()) return { ok: false, error: "Hệ thống đang bảo trì (Quota). Thử lại sau." };
   try {
     const email = `${username.toLowerCase().replace(/\s/g, '')}@kichbanai.local`;
 
@@ -110,12 +187,11 @@ export const signup = async (username: string, password: string): Promise<{ ok: 
       role: 'user',
       expiresAt: null, 
       createdAt: Date.now(),
-      isActive: false, // Mặc định chờ duyệt
+      isActive: false, 
       personalContext: '',
       templateContexts: {}
     };
 
-    // Lưu thông tin bổ sung vào Firestore
     await setDoc(doc(db, USERS_COLLECTION, user.uid), newAccount);
 
     return { ok: true, account: newAccount };
@@ -124,11 +200,14 @@ export const signup = async (username: string, password: string): Promise<{ ok: 
     let msg = error.message;
     if (msg.includes('email-already-in-use')) msg = 'Tài khoản/Email này đã tồn tại.';
     if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu (tối thiểu 6 ký tự).';
+    if (msg.includes('resource-exhausted')) {
+        setGlobalQuotaExceeded();
+        msg = 'Hệ thống đang bảo trì (Hết hạn mức). Vui lòng thử lại sau.';
+    }
     return { ok: false, error: msg };
   }
 };
 
-// Admin creating account directly
 export const createAccountByAdmin = async (
   username: string, 
   emailInput: string | null,
@@ -136,8 +215,8 @@ export const createAccountByAdmin = async (
   role: AccountRole, 
   daysValid: number | null 
 ): Promise<{ ok: boolean; error?: string; account?: Account }> => {
+  if (checkGlobalQuota()) return { ok: false, error: "Quota Exceeded." };
   
-  // STRATEGY: Secondary App Instance
   let secondaryApp: FirebaseApp | undefined;
 
   try {
@@ -167,7 +246,7 @@ export const createAccountByAdmin = async (
       role: role,
       expiresAt: expiresAt,
       createdAt: Date.now(),
-      isActive: true, // Admin tạo thì active luôn
+      isActive: true, 
       personalContext: '',
       templateContexts: {}
     };
@@ -181,7 +260,7 @@ export const createAccountByAdmin = async (
     console.error("Admin Create Error:", error);
     let msg = error.message;
     if (msg.includes('email-already-in-use')) msg = 'Email/Username này đã tồn tại.';
-    if (msg.includes('weak-password')) msg = 'Mật khẩu quá yếu.';
+    if (msg.includes('resource-exhausted')) setGlobalQuotaExceeded();
     return { ok: false, error: msg };
   } finally {
     if (secondaryApp) {
@@ -191,6 +270,7 @@ export const createAccountByAdmin = async (
 };
 
 export const authenticate = async (username: string, password: string): Promise<{ ok: boolean; account?: Account; error?: string }> => {
+  if (checkGlobalQuota()) return { ok: false, error: "Hệ thống đang bảo trì (Quota)." };
   try {
     let email = username;
     if (!username.includes('@')) {
@@ -203,8 +283,8 @@ export const authenticate = async (username: string, password: string): Promise<
     const account = await getUserProfile(user.uid);
 
     if (!account) {
-      await signOut(auth);
-      return { ok: false, error: 'Không tìm thấy thông tin hồ sơ người dùng.' };
+        await signOut(auth);
+        return { ok: false, error: 'Lỗi hệ thống: Không thể tải hồ sơ (Quota/Network).' };
     }
 
     if (!account.isActive) {
@@ -224,6 +304,7 @@ export const authenticate = async (username: string, password: string): Promise<
     if (msg.includes('user-not-found') || msg.includes('wrong-password') || msg.includes('invalid-credential')) {
       msg = 'Tài khoản hoặc mật khẩu không đúng.';
     }
+    if (msg.includes('resource-exhausted')) setGlobalQuotaExceeded();
     return { ok: false, error: msg };
   }
 };
@@ -231,9 +312,11 @@ export const authenticate = async (username: string, password: string): Promise<
 export const logout = async () => {
   await signOut(auth);
   localStorage.removeItem('app_admin_auth');
+  sessionStorage.clear(); // Clear profile cache
 };
 
 export const extendAccount = async (id: string, days: number): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     const account = await getUserProfile(id);
     if (!account) return false;
@@ -254,13 +337,14 @@ export const extendAccount = async (id: string, days: number): Promise<boolean> 
       isActive: true
     });
     return true;
-  } catch (e) {
-    console.error(e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
 export const toggleAccountActive = async (id: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     const account = await getUserProfile(id);
     if (!account) return false;
@@ -271,33 +355,38 @@ export const toggleAccountActive = async (id: string): Promise<boolean> => {
       isActive: !account.isActive
     });
     return true;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
 export const updateUserRole = async (id: string, role: AccountRole): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     await updateDoc(doc(db, USERS_COLLECTION, id), {
       role: role
     });
     return true;
-  } catch (e) {
-    console.error("Error updating role:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
 export const deleteAccount = async (id: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     await deleteDoc(doc(db, USERS_COLLECTION, id));
     return true;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
 export const upgradeToAdmin = async (uid: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     await updateDoc(doc(db, USERS_COLLECTION, uid), {
       role: 'admin',
@@ -305,38 +394,55 @@ export const upgradeToAdmin = async (uid: string): Promise<boolean> => {
       expiresAt: null 
     });
     return true;
-  } catch (e) {
-    console.error("Upgrade admin error:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
-// --- Update Personal Context (Brand Voice) ---
-
-// 1. Cập nhật ngữ cảnh chung
 export const updatePersonalContext = async (uid: string, context: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
     await updateDoc(doc(db, USERS_COLLECTION, uid), {
       personalContext: context
     });
+    
+    // Update Cache
+    const CACHE_KEY = `user_profile_${uid}`;
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) {
+        const data = JSON.parse(cached) as Account;
+        data.personalContext = context;
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    }
+    
     return true;
-  } catch (e) {
-    console.error("Update Context Error:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };
 
-// 2. Cập nhật ngữ cảnh riêng cho từng Template
 export const updateTemplateContext = async (uid: string, templateId: string, context: string): Promise<boolean> => {
+  if (checkGlobalQuota()) return false;
   try {
-    // Firestore update nested fields using dot notation: "templateContexts.templateId"
     const fieldPath = `templateContexts.${templateId}`;
     await updateDoc(doc(db, USERS_COLLECTION, uid), {
       [fieldPath]: context
     });
+
+    const CACHE_KEY = `user_profile_${uid}`;
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) {
+        const data = JSON.parse(cached) as Account;
+        if (!data.templateContexts) data.templateContexts = {};
+        data.templateContexts[templateId] = context;
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    }
+
     return true;
-  } catch (e) {
-    console.error("Update Template Context Error:", e);
+  } catch (e: any) {
+    if (e.code === 'resource-exhausted') setGlobalQuotaExceeded();
     return false;
   }
 };

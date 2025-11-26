@@ -80,62 +80,56 @@ export const TEMPLATES: ScriptTemplate[] = [
     id: 'general', // Drama Template
     icon: '🎭', 
     title: 'Câu chuyện DRAMA',
-    description: 'Cốt truyện kịch tính, tự động điều chỉnh độ dài.',
+    description: 'Cốt truyện kịch tính 7 bước: Uẩn khúc -> Xung đột -> Cao trào.',
     systemPromptAddon: `
       ROLE: Master Screenwriter for Realistic Family Dramas.
       
       *** STRUCTURAL RESET (IMPORTANT) ***
-      - FORGET any "7-Part" or "10-Chapter" structures. 
-      - DO NOT use the "Before we dive into today's story..." YouTube intro.
-      - STRUCTURE: Simple Timeline (Beginning -> Middle -> Climax -> End).
+      - DO NOT use the "Before we dive into today's story..." intro.
+      - DO NOT force a 10-chapter list if it makes the story rush.
       
+      *** THE 7-STAGE PLOT FRAMEWORK (STRICT ADHERENCE) ***
+      1. Khởi đầu (Beginning): Introduce characters & setting.
+      2. Uẩn Khúc (Mystery): Add 1-2 Plot Twists. Something is wrong.
+      3. Xung Đột (Conflict): Add 3-4 Complications. Tensions rise.
+      4. Xung Đột Leo Thang (Escalation): Add 3-4 Major Twists. Stakes are high.
+      5. Cao Trào (Climax): The explosion point.
+      6. Vạch Trần/Giải Quyết (Resolution): The truth comes out.
+      7. Kết Thúc (Ending): Emotional closure.
+
       *** CONSISTENCY RULES ***
-      - NAMES: If the user provides names, USE THEM. If not, pick a set of names (e.g., Eleanor, Jessica, Greg) and STICK TO THEM. Do not change names halfway.
-      - SETTING: Keep the location consistent (e.g., Ohio suburbs). Do not jump to Miami or Italy randomly.
+      - NAMES: Use consistent names (e.g., Eleanor, Jessica, Greg).
+      - SETTING: Keep the location consistent.
       
       *** TONE & STYLE ***
-      - REALISM > MELODRAMA: Write dialogue that sounds like real people. Avoid "soap opera" monologues about "cold fury" or "absolute betrayal".
-      - Show, Don't Tell: Describe actions, not just internal thoughts.
-      - NO REPETITION: Do not repeat the same flashback or argument multiple times.
+      - REALISM > MELODRAMA: Realistic dialogue.
+      - Show, Don't Tell.
+      - NO REPETITION of events.
 
-      *** MANDATORY WRITING RULES (STRICT) ***
-      1. THE "HOOK" (First 0-30s ONLY): 
-         - Open with the emotional wound immediately. 
-         - NO "Welcome back" or "Subscribe now" pleas at the start.
-
-      2. OUTPUT FORMAT (TTS OPTIMIZED):
-         - Output PURE SPOKEN TEXT only.
-         - NO [Actions].
-         - Paragraphs must be short (3-5 sentences).
-
-      3. PACING CONTROL:
-         - Eliminate filler words.
-         - Keep the story moving forward constantly.
+      *** MANDATORY WRITING RULES ***
+      1. THE "HOOK": Open with the emotional wound immediately.
+      2. OUTPUT FORMAT: PURE SPOKEN TEXT. NO HEADERS.
     `
   },
   {
     id: 'senior-love',
     icon: '👵',
     title: 'Câu chuyện Senior Love',
-    description: 'Hồi xuân & Cấm kỵ. Tự động điều chỉnh độ dài.',
+    description: 'Tình yêu tuổi già: Uẩn khúc, Xung đột & Hạnh phúc.',
     systemPromptAddon: `
       ROLE: Master Romance Novelist for Seniors.
       
-      *** STRUCTURAL RESET (IMPORTANT) ***
-      - FORGET any "7-Part" or "10-Chapter" structures. 
-      - DO NOT use the "Before we dive into today's story..." intro.
-      
-      *** MANDATORY RANDOMIZATION PROTOCOL ***
-      - NEW IDENTITIES: You MUST invent BRAND NEW names for the couple every time.
-      - NEW AGES: Vary the ages (e.g., 62 & 70, then 68 & 75).
+      *** THE 7-STAGE LOVE FRAMEWORK ***
+      1. Khởi đầu: The meeting / The spark.
+      2. Uẩn Khúc: 1-2 Twists (Hidden past, Illness, Secret child).
+      3. Xung Đột: 3-4 Obstacles (Family disapproval, Society).
+      4. Xung Đột Leo Thang: 3-4 Major Twists (Threat of separation).
+      5. Cao Trào: The ultimate decision to be together.
+      6. Vạch Trần/Giải Quyết: Family accepts or they run away.
+      7. Kết Thúc: Peaceful happiness.
 
-      *** ADAPTIVE NARRATIVE STRUCTURE ***
-      - Adjust the pace to fit the requested time exactly.
-      - PLOT FLOW: The Spark -> The Secret -> The Conflict (Family/Society) -> The Resolution.
-
-      *** KEY INGREDIENTS ***
-      - Focus on SENSORY details (touch, smell, silence).
-      - Avoid repetitive internal monologues. Focus on interactions.
+      *** MANDATORY RANDOMIZATION ***
+      - NEW IDENTITIES: Invent BRAND NEW names/ages every time.
       
       *** MANDATORY WRITING RULES ***
       1. THE "HOOK": Open with the moment of "Rejuvenation".

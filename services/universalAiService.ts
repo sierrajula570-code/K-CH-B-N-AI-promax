@@ -1,7 +1,7 @@
 
 
 import { GoogleGenAI } from "@google/genai";
-import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption, AIProvider } from '../types';
+import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption, AIProvider, ScriptAnalysis } from '../types';
 
 // --- HELPER TYPES & FUNCTIONS ---
 
@@ -25,6 +25,7 @@ interface GenerateOptions {
   persona?: 'auto' | 'buffett' | 'munger';
   personalContext?: string;
   learnedExamples?: string[]; // Dữ liệu tự học từ lịch sử
+  approvedAnalysis?: ScriptAnalysis; // Dữ liệu phân tích đã được user duyệt
   apiKeys: ApiKeys;
 }
 
@@ -46,153 +47,39 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
   
-  // FIXED: Set exactly to 1000 chars/min as requested
-  // This helps maintain a predictable output length (e.g., 60 mins -> 60k chars)
+  // ADJUSTMENT: 950 chars/min to aim for ~57,000 chars for 60 mins.
   let targetChars = 0;
   if (isCJK) {
     targetChars = Math.round(minutes * 300);
   } else {
-    targetChars = Math.round(minutes * 1000); 
+    targetChars = Math.round(minutes * 950); 
   }
 
-  // Strict range to avoid overflowing (Target +/- 5% only)
+  // Strict range
   const minChars = Math.round(targetChars * 0.95); 
   const maxChars = Math.round(targetChars * 1.05); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
 
-// --- ARTIFACT CLEANER (FOR TTS) ---
+// --- ARTIFACT CLEANER ---
 const cleanArtifacts = (text: string): string => {
   if (!text) return "";
-  
   let cleaned = text;
-
-  // 1. Remove Markdown headers and bold headers
   cleaned = cleaned.replace(/^#+\s.*$/gm, ''); 
   cleaned = cleaned.replace(/^\*\*.*(Part|Chapter|Phần|Chương|Intro|Outro).*\*\*[:\s]*$/gmi, ''); 
   cleaned = cleaned.replace(/^.*(Part|Chapter|Phần|Chương)\s+\d+[:\.]?\s*$/gmi, ''); 
-
-  // 2. Remove Labels
   cleaned = cleaned.replace(/^(Hook|Intro|Body|Conclusion|Lời dẫn|Thân bài|Kết bài|Scene \d+):/gmi, '');
-  
-  // 3. Remove Brackets/Parentheses (actions)
   cleaned = cleaned.replace(/\[.*?\]/g, ''); 
   cleaned = cleaned.replace(/\(.*?\)/g, ''); 
-
-  // 4. Remove Common AI Chaining Phrases & Repetitive Hooks
   cleaned = cleaned.replace(/Here is the (next|continuation).*?:/gi, '');
-  cleaned = cleaned.replace(/Continuing from where we left off.*?/gi, '');
-  cleaned = cleaned.replace(/As mentioned in the previous part.*?/gi, '');
-  
-  // -- SPECIFIC REMOVAL OF THE UNWANTED HOOKS --
-  // More aggressive cleaning of the specific YouTube engagement bait
   cleaned = cleaned.replace(/Before we (dive|jump) into today’s story.*?(Let’s get started|Let’s begin)!/gsi, '');
   cleaned = cleaned.replace(/Before we dive into today’s story.*?(\.|\!)/gi, '');
   cleaned = cleaned.replace(/take a moment to (let us know|share).*?(\.|\!)/gi, '');
-  
-  // Clean up residual sentences if the regex wasn't greedy enough or varied slightly
   cleaned = cleaned.replace(/If you haven’t already, (be sure to|don’t forget to) (hit|click) that subscribe button.*?(\.|\!)/gi, '');
   cleaned = cleaned.replace(/Now, (settle in|get comfortable|grab a).*?(\.|\!)/gi, '');
-  
-  cleaned = cleaned.replace(/Before we dive in.*?/gi, ''); 
-  cleaned = cleaned.replace(/Welcome back to.*?/gi, '');
-  cleaned = cleaned.replace(/In today's story.*?/gi, '');
-
-  // 5. Cleanup Multiple Newlines
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  
   return cleaned.trim();
-};
-
-// --- PROMPT BUILDER (Unified) ---
-const buildSystemInstruction = (
-  template: ScriptTemplate, 
-  language: LanguageOption, 
-  perspective: PerspectiveOption,
-  persona: string = 'auto',
-  personalContext?: string,
-  learnedExamples?: string[]
-): string => {
-
-  let languageRules = "";
-  if (language.id === 'vi') {
-    languageRules = `
-      - VIETNAMESE SPECIFIC:
-      - Read numbers as words (e.g., "2024" -> "hai nghìn không trăm hai mươi tư").
-      - Use "VTV" style: Formal, clear, precise.
-      - LOCALIZATION: Use Vietnamese names (Hùng, Lan, Tuấn...) and locations (Hà Nội, Sài Gòn...) unless the topic implies otherwise.
-    `;
-  } else {
-    languageRules = `
-      - Ensure natural phrasing for native speakers of ${language.code}.
-      - LOCALIZATION: Adapt names, cities, and currency to match ${language.code} culture.
-      - If input is in a different language, TRANSLATE IT COMPLETELY.
-    `;
-  }
-
-  let personaInstruction = "";
-  if (template.id === 'charlie-munger') {
-     if (persona === 'buffett') {
-       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of WARREN BUFFETT (Optimistic, Folksy, Grandfatherly). DO NOT be Munger.";
-     } else if (persona === 'munger') {
-       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of CHARLIE MUNGER (Blunt, Realistic, Cynical). DO NOT be Buffett.";
-     } else {
-       personaInstruction = "AUTO-DETECT MODE: Analyze the input to decide whether to be Buffett or Munger.";
-     }
-  }
-
-  let contextInstruction = "";
-  if (personalContext && personalContext.trim().length > 0) {
-    contextInstruction = `
-      *** PERSONAL CONTEXT / BRAND VOICE ***
-      USER CONTEXT: """${personalContext}"""
-      INSTRUCTION: Apply this context implicitly.
-    `;
-  }
-
-  let learningInstruction = "";
-  if (learnedExamples && learnedExamples.length > 0) {
-    learningInstruction = `
-      *** ADAPTIVE STYLE LEARNING ***
-      YOUR GOAL: MIMIC the style of these past examples:
-      --- [EXAMPLE START] ---
-      ${learnedExamples[0].substring(0, 500)}...
-      --- [EXAMPLE END] ---
-    `;
-  }
-
-  return `
-    *** CRITICAL LANGUAGE FIREWALL ***
-    YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
-    
-    *** CULTURAL LOCALIZATION (MANDATORY) ***
-    - YOU MUST ADAPT THE STORY TO THE CULTURE OF: ${language.code.toUpperCase()}.
-    - CHANGE NAMES: Use common names from that country.
-    - CHANGE LOCATIONS: Use cities/regions from that country.
-    
-    ROLE: Expert YouTube Scriptwriter & Voice Director.
-    TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.
-    
-    *** NARRATIVE PERSPECTIVE ***
-    - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
-    - INSTRUCTION: Maintain this perspective consistently.
-
-    ${personaInstruction}
-    ${contextInstruction}
-    ${learningInstruction}
-
-    === STRICT TTS FORMATTING ENGINE ===
-    1. PARAGRAPH STRUCTURE: Short paragraphs (3-5 sentences). ONE main idea per paragraph.
-    2. NO LISTS / NO HEADERS: Transform lists into narrative sentences. Output PURE SPOKEN TEXT.
-    3. CLEAN AUDIO ONLY: NO [Intro], [Music], [Sound Effect].
-    4. NATURAL FLOW: AVOID filler words. Ensure logic flows forward.
-
-    ${languageRules}
-
-    TEMPLATE: ${template.title}
-    ${template.systemPromptAddon}
-  `;
 };
 
 // --- RAW API CALLERS ---
@@ -275,21 +162,177 @@ async function callGoogle(apiKey: string, model: string, system: string, user: s
   return generate();
 }
 
+// --- NEW FEATURE: ANALYZE REQUEST ---
+export const analyzeScriptRequest = async (options: GenerateOptions): Promise<ScriptAnalysis> => {
+    const { provider, model, input, template, language, apiKeys } = options;
+    
+    const systemPrompt = `
+      ROLE: Senior Script Doctor & Architect.
+      TASK: Analyze the user's idea and outline a solid structure + character list.
+      OUTPUT LANGUAGE: ${language.code.toUpperCase()} (Vietnamese if 'vi').
+      
+      REQUIREMENTS:
+      1. Define the 7-Stage Plot Framework specific to this story.
+      2. Create a list of FIXED characters (Name, Role, Key Trait).
+      3. OUTPUT FORMAT: JSON ONLY. No markdown.
+      
+      JSON SCHEMA:
+      {
+        "outline": [
+           "Stage 1 (Start): [Detail]",
+           "Stage 2 (Mystery): [Detail]",
+           "Stage 3 (Conflict): [Detail]",
+           "Stage 4 (Escalation): [Detail]",
+           "Stage 5 (Climax): [Detail]",
+           "Stage 6 (Resolution): [Detail]",
+           "Stage 7 (Ending): [Detail]"
+        ],
+        "characters": [
+           "Name - Role - Trait",
+           "Name - Role - Trait"
+        ],
+        "pacingNote": "Brief advice on tone (e.g., Slow burn, Fast paced)"
+      }
+    `;
+    
+    const userPrompt = `Input Idea: "${input}"\nTemplate: ${template.title}`;
+
+    const executeCall = async (sys: string, usr: string) => {
+        switch (provider) {
+          case 'openai': return callOpenAI(apiKeys.openaiApiKey || '', model, sys, usr);
+          case 'anthropic': return callAnthropic(apiKeys.anthropicApiKey || '', model, sys, usr);
+          case 'xai': return callXAI(apiKeys.xaiApiKey || '', model, sys, usr);
+          case 'google': return callGoogle(apiKeys.googleApiKey || '', model, sys, usr);
+          default: throw new Error(`Provider ${provider} not supported`);
+        }
+    };
+
+    try {
+        let raw = await executeCall(systemPrompt, userPrompt);
+        // Clean markdown code blocks if present
+        raw = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(raw);
+        return {
+            outline: parsed.outline || [],
+            characters: parsed.characters || [],
+            pacingNote: parsed.pacingNote || "Standard Pacing"
+        };
+    } catch (e) {
+        console.error("Analysis Parsing Error:", e);
+        // Fallback if AI fails to return JSON
+        return {
+            outline: ["Khởi đầu", "Uẩn khúc", "Xung đột", "Leo thang", "Cao trào", "Giải quyết", "Kết thúc"],
+            characters: ["Nhân vật chính (Chưa đặt tên)", "Nhân vật phụ (Chưa đặt tên)"],
+            pacingNote: "Manual Review Needed"
+        };
+    }
+};
+
+// --- PROMPT BUILDER (Unified) ---
+const buildSystemInstruction = (
+  template: ScriptTemplate, 
+  language: LanguageOption, 
+  perspective: PerspectiveOption,
+  persona: string = 'auto',
+  personalContext?: string,
+  learnedExamples?: string[],
+  approvedAnalysis?: ScriptAnalysis
+): string => {
+
+  let languageRules = "";
+  if (language.id === 'vi') {
+    languageRules = `
+      - VIETNAMESE SPECIFIC:
+      - Read numbers as words.
+      - Use "VTV" style: Formal, clear, precise.
+      - LOCALIZATION: Use Vietnamese names/locations unless topic implies otherwise.
+    `;
+  } else {
+    languageRules = `
+      - Ensure natural phrasing for native speakers of ${language.code}.
+    `;
+  }
+
+  let approvedStructureInstruction = "";
+  if (approvedAnalysis) {
+      approvedStructureInstruction = `
+        *** APPROVED BLUEPRINT (DO NOT DEVIATE) ***
+        1. CHARACTERS (FIXED):
+           ${approvedAnalysis.characters.join('\n           ')}
+           -> YOU MUST USE THESE NAMES EXACTLY. DO NOT INVENT NEW MAIN CHARACTERS.
+           
+        2. PLOT OUTLINE (FIXED):
+           ${approvedAnalysis.outline.map((step, idx) => `Stage ${idx+1}: ${step}`).join('\n           ')}
+           -> FOLLOW THIS TRAJECTORY STRICTLY.
+      `;
+  }
+
+  let personaInstruction = "";
+  if (template.id === 'charlie-munger') {
+     if (persona === 'buffett') {
+       personaInstruction = "IMPORTANT: You are WARREN BUFFETT.";
+     } else if (persona === 'munger') {
+       personaInstruction = "IMPORTANT: You are CHARLIE MUNGER.";
+     }
+  }
+
+  let contextInstruction = "";
+  if (personalContext && personalContext.trim().length > 0) {
+    contextInstruction = `USER CONTEXT: """${personalContext}"""\nApply this context implicitly.`;
+  }
+
+  let learningInstruction = "";
+  if (learnedExamples && learnedExamples.length > 0) {
+    learningInstruction = `
+      *** STYLE MIMICRY ***
+      MIMIC this style:
+      ${learnedExamples[0].substring(0, 500)}...
+    `;
+  }
+
+  return `
+    *** CRITICAL LANGUAGE FIREWALL ***
+    YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
+    
+    ROLE: Expert Scriptwriter.
+    TONE: Natural Storytelling, Emotional but Grounded.
+    
+    *** NARRATIVE PERSPECTIVE ***
+    - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO'}
+
+    ${approvedStructureInstruction}
+
+    ${personaInstruction}
+    ${contextInstruction}
+    ${learningInstruction}
+
+    === STRICT TTS FORMATTING ===
+    1. Short paragraphs (3-5 sentences).
+    2. NO LISTS. Narrative only.
+    3. NO [Music], [Sound].
+    4. NO "Before we dive in...".
+
+    ${languageRules}
+
+    TEMPLATE: ${template.title}
+    ${template.systemPromptAddon}
+  `;
+};
+
 // --- MAIN UNIVERSAL GENERATOR ---
 
 export const universalGenerateScript = async (options: GenerateOptions): Promise<string> => {
   const { 
     provider, model, input, template, language, duration, 
-    customMinutes, persona, personalContext, learnedExamples, apiKeys 
+    customMinutes, persona, personalContext, learnedExamples, apiKeys, approvedAnalysis 
   } = options;
 
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
   const systemInstruction = buildSystemInstruction(
-      template, language, options.perspective, persona, personalContext, learnedExamples 
+      template, language, options.perspective, persona, personalContext, learnedExamples, approvedAnalysis 
   );
   
-  // Chunk duration increased to 5 minutes to maintain better context
   const CHUNK_DURATION = 5;
   const useChainedGeneration = config.minutes > 6; 
 
@@ -305,109 +348,88 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
 
   try {
     if (!useChainedGeneration) {
-      // --- SINGLE PASS ---
-      // Conversion: 1 word approx 4.5 chars
       const maxWords = Math.round(config.targetChars / 4.5);
-
       const userPrompt = `
         TASK: Write a ${config.minutes}-minute script.
-        TARGET LENGTH: ~${config.targetChars} characters (Approx ${maxWords} words).
-        OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-        INPUT TOPIC: "${input}"
-        
-        STRUCTURE:
-        - Write continuously. No headers.
-        - Insert ONE strong "Hook" at the beginning.
-        
-        STRICT LENGTH CONSTRAINT:
-        - Do NOT exceed ${maxWords + 100} words.
-        - Stop when you have reached the logical conclusion.
+        TARGET: ~${maxWords} words.
+        TOPIC: "${input}"
+        ${approvedAnalysis ? "NOTE: Stick to the Approved Blueprint defined in System Prompt." : ""}
+        STRUCTURE: Continuous narrative. ONE Hook at start.
       `;
       const rawText = await executeCall(systemInstruction, userPrompt);
       return cleanArtifacts(rawText);
 
     } else {
-      // --- CHAINED GENERATION WITH INTELLIGENT PACING ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
-      const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5); 
+      const chunkWordTarget = Math.round((config.targetChars / totalParts) / 4.5); 
       
       let fullScript = "";
       let previousContext = "";
 
-      console.log(`🚀 Starting Chain: ${totalParts} Parts. Target: ~${chunkWordTarget} words/part.`);
+      console.log(`🚀 Starting Chain: ${totalParts} Parts with Approved Blueprint.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
-        let partPrompt = "";
-
-        // --- PACING CONTROL ---
-        let pacingInstruction = "";
+        const progress = i / totalParts;
         
-        if (isFirst) {
-            pacingInstruction = `
-              - STATUS: BEGINNING.
-              - ACTION: Introduce characters (Names, Ages) and the main conflict. 
-              - SETTING: Establish a specific location (e.g., Ohio, Vietnam) and STICK TO IT.
-            `;
-        } else if (isLast) {
+        // Map progress to the 7 stages from the Approved Analysis if available
+        let pacingInstruction = "";
+        let stageName = "";
+        
+        if (approvedAnalysis && approvedAnalysis.outline.length === 7) {
+             // Logic mapping 7 outline steps to parts
+             // Simple distribution logic
+             const stageIndex = Math.floor((i - 1) / totalParts * 7); 
+             // Ensure we don't go out of bounds
+             const validIndex = Math.min(stageIndex, 6);
+             stageName = `Stage ${validIndex + 1}`;
+             const stageDetail = approvedAnalysis.outline[validIndex];
+             
              pacingInstruction = `
-              - STATUS: ENDING.
-              - ACTION: Resolve the main conflict. Provide emotional closure.
-              - IMPORTANT: Wrap up the story. Do NOT start a new subplot.
-            `;
+                CURRENT FOCUS: ${stageName}.
+                DETAILS: ${stageDetail}.
+                Keep characters consistent: ${approvedAnalysis.characters.join(', ')}.
+             `;
         } else {
-            pacingInstruction = `
-              - STATUS: MIDDLE (Development).
-              - ACTION: Escalate the conflict. Move the story forward.
-              - DO NOT introduce new main characters.
-              - DO NOT start a new random plot (like a murder mystery) if not present before.
-            `;
+             // Fallback logic if no analysis (old logic)
+             if (progress <= 0.15) pacingInstruction = "STAGE: KHỞI ĐẦU.";
+             else if (progress <= 0.30) pacingInstruction = "STAGE: UẨN KHÚC.";
+             else if (progress <= 0.50) pacingInstruction = "STAGE: XUNG ĐỘT.";
+             else if (progress <= 0.70) pacingInstruction = "STAGE: LEO THANG.";
+             else if (progress <= 0.85) pacingInstruction = "STAGE: CAO TRÀO.";
+             else pacingInstruction = "STAGE: KẾT THÚC.";
         }
 
-        // --- ANTI-LOOPING & CONSISTENCY ---
-        // We pass a much larger context window (last 4000 chars) to ensure the AI remembers names.
         const contextWindow = previousContext.slice(-4000); 
-
         const consistencyCheck = i > 1 ? `
-            *** CRITICAL CONSISTENCY RULES ***
-            1. CONSISTENT NAMES: You MUST use the SAME character names as the previous context.
-            2. CONSISTENT LOCATION: Do not change the city/setting unless they travel.
-            3. NO RECAPS: Do NOT say "Previously..." or "As we saw...".
-            4. NO NEW HOOKS: Do NOT say "Before we dive in..." or "Welcome back...".
-            5. CONTINUITY: Continue the scene exactly where the previous text cut off.
+            *** CONTINUITY ***
+            1. NAMES: Must match Approved List.
+            2. NO RECAPS.
+            3. Continue exactly where left off.
         ` : "";
 
         const promptTemplate = `
             *** PART ${i} of ${totalParts} ***
-            OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkWordTarget} words).
-            TOPIC: "${input}"
+            GOAL: Write NEXT ~${chunkWordTarget} words.
+            ${pacingInstruction}
             
-            PACING INSTRUCTION: ${pacingInstruction}
-            
-            ${i > 1 ? `PREVIOUS CONTEXT (STORY SO FAR): "...${contextWindow}"` : ""}
-            
+            ${i > 1 ? `PREVIOUS CONTEXT: "...${contextWindow}"` : ""}
             ${consistencyCheck}
-            
-            STRICT LENGTH CONSTRAINT:
-            - Target: ~${chunkWordTarget} words.
-            - Do not write significantly more than this.
         `;
 
         let partText = await executeCall(systemInstruction, promptTemplate);
         partText = cleanArtifacts(partText);
 
         fullScript += (isFirst ? "" : " ") + partText;
-        previousContext = partText; // Store last part for context
+        previousContext = partText;
 
         if (!isLast) await delay(1000); 
       }
       return fullScript;
     }
   } catch (error: any) {
-    console.error(`Error in Universal Generation (${provider}):`, error);
-    return `⚠️ LỖI (${provider.toUpperCase()}): ${error.message}`;
+    console.error(`Error in Generator:`, error);
+    return `⚠️ LỖI: ${error.message}`;
   }
 };
