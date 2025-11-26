@@ -14,7 +14,8 @@ import {
   getDoc, 
   getDocs, 
   updateDoc, 
-  deleteDoc
+  deleteDoc,
+  onSnapshot
 } from 'firebase/firestore';
 
 export type AccountRole = 'admin' | 'user';
@@ -29,6 +30,7 @@ export interface Account {
   isActive: boolean;
   personalContext?: string; // Dữ liệu ngữ cảnh chung (Global)
   templateContexts?: Record<string, string>; // Dữ liệu ngữ cảnh riêng cho từng Template ID
+  currentSessionId?: string; // ID phiên đăng nhập hiện tại (Single Device Check)
 }
 
 const USERS_COLLECTION = 'users';
@@ -62,6 +64,33 @@ export const getAccounts = async (): Promise<Account[]> => {
     console.error("Error getting accounts:", e);
     return [];
   }
+};
+
+// --- SINGLE DEVICE SESSION MANAGEMENT ---
+
+// Hàm này đánh dấu thiết bị hiện tại là "Chủ sở hữu phiên"
+export const claimSession = async (uid: string): Promise<string> => {
+  try {
+    const newSessionId = Date.now().toString() + Math.random().toString().slice(2, 8);
+    await updateDoc(doc(db, USERS_COLLECTION, uid), {
+      currentSessionId: newSessionId
+    });
+    return newSessionId;
+  } catch (e) {
+    console.error("Error claiming session:", e);
+    return "";
+  }
+};
+
+// Hàm lắng nghe thay đổi Real-time của User (để phát hiện bị kick hoặc hết hạn)
+export const listenToAccountChanges = (uid: string, callback: (account: Account | null) => void) => {
+  return onSnapshot(doc(db, USERS_COLLECTION, uid), (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data() as Account);
+    } else {
+      callback(null); // Tài khoản bị xóa
+    }
+  });
 };
 
 // --- Core Logic ---

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TEMPLATES, LANGUAGES, DURATIONS, PERSPECTIVES, AI_MODELS } from './constants'; 
 import { ScriptTemplate, LanguageOption, DurationOption, PerspectiveOption, InputMode, HistoryItem, AIProvider } from './types';
 import Header from './components/Header';
@@ -19,7 +19,9 @@ import {
   getUserProfile,
   Account,
   logout,
-  upgradeToAdmin
+  upgradeToAdmin,
+  claimSession,
+  listenToAccountChanges
 } from './services/accountService';
 import { 
   getHistory, 
@@ -31,7 +33,7 @@ import {
 } from './services/historyService';
 import { fetchAppConfig } from './services/configService';
 import { auth, isConfigured } from './services/firebase'; 
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, Unsubscribe } from 'firebase/auth';
 import { Zap, Loader2 } from 'lucide-react';
 
 function App() {
@@ -77,6 +79,10 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [targetStats, setTargetStats] = useState<{ min: number; max: number; target: number } | undefined>(undefined);
 
+  // Single Session Ref
+  const mySessionIdRef = useRef<string | null>(null);
+  const accountListenerRef = useRef<Unsubscribe | null>(null);
+
   // --- Auth Initialization with Firebase ---
   useEffect(() => {
     if (!isConfigured) {
@@ -102,6 +108,13 @@ function App() {
     // 2. Auth State Listener
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsCheckingAuth(true);
+      
+      // Clear previous listener if any (e.g. user switch)
+      if (accountListenerRef.current) {
+        accountListenerRef.current();
+        accountListenerRef.current = null;
+      }
+
       if (user) {
         const profile = await getUserProfile(user.uid);
         if (profile) {
@@ -117,6 +130,36 @@ function App() {
              setCurrentAccount(profile);
              setIsLoginOpen(false);
              loadCloudHistory(profile.id);
+
+             // --- SINGLE SESSION ENFORCEMENT ---
+             // 1. Claim this session (Update DB)
+             const newSessionId = await claimSession(user.uid);
+             mySessionIdRef.current = newSessionId;
+
+             // 2. Listen to DB changes to see if we get kicked
+             const unsubListener = listenToAccountChanges(user.uid, (updatedProfile) => {
+               if (!updatedProfile) return; // Deleted
+
+               // Check if session ID changed on server and differs from ours
+               if (updatedProfile.currentSessionId && updatedProfile.currentSessionId !== mySessionIdRef.current) {
+                 // Someone else logged in!
+                 alert("⚠️ PHÁT HIỆN ĐĂNG NHẬP KHÁC\n\nTài khoản của bạn vừa được đăng nhập trên một thiết bị khác. Phiên làm việc này sẽ bị đăng xuất.");
+                 logout();
+                 window.location.reload();
+               }
+               
+               // Also check if account is locked or expired in real-time
+               if (!updatedProfile.isActive) {
+                   alert("Tài khoản của bạn đã bị KHÓA bởi quản trị viên.");
+                   logout();
+                   window.location.reload();
+               }
+               
+               // Update local state to reflect role changes etc.
+               setCurrentAccount(updatedProfile);
+             });
+             
+             accountListenerRef.current = unsubListener;
            }
         } else {
           setCurrentAccount(null);
@@ -126,11 +169,15 @@ function App() {
         setCurrentAccount(null);
         setHistory([]);
         setIsLoginOpen(true);
+        mySessionIdRef.current = null;
       }
       setIsCheckingAuth(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (accountListenerRef.current) accountListenerRef.current();
+    };
   }, []);
 
   // --- History Logic ---
