@@ -44,17 +44,17 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
   }
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
-  // Math: CJK ~333 chars/min, Latin ~1000 chars/min
+  // Math: CJK ~300 chars/min, Latin fixed at 1000 chars/min per user request
   let targetChars = 0;
   if (isCJK) {
-    targetChars = Math.round(minutes * (1000 / 3));
+    targetChars = Math.round(minutes * 300);
   } else {
-    targetChars = minutes * 1000;
+    targetChars = Math.round(minutes * 1000);
   }
 
-  // Strict range
-  const minChars = Math.round(targetChars * 0.95); 
-  const maxChars = Math.round(targetChars * 1.30); 
+  // Strict range to avoid overflowing (Target +/- 10%)
+  const minChars = Math.round(targetChars * 0.90); 
+  const maxChars = Math.round(targetChars * 1.10); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -312,8 +312,9 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
   );
   
   // Decide Strategy: Single vs Chained
-  const CHUNK_DURATION = 3;
-  const useChainedGeneration = config.minutes > 4;
+  // Keep Chunk Duration at 5 minutes to balance coherence vs length
+  const CHUNK_DURATION = 5;
+  const useChainedGeneration = config.minutes > 6; 
 
   const executeCall = async (sys: string, usr: string) => {
     switch (provider) {
@@ -347,15 +348,19 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
     } else {
       // --- CHAINED GENERATION ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
+      
+      // Dynamic Chunk Target calculation
+      // Divide total target by parts to ensure we don't overshoot
+      const chunkCharsTarget = Math.round(config.targetChars / totalParts);
+      
       let fullScript = "";
       let previousContext = "";
 
-      console.log(`🚀 Starting Universal Chain (${provider}): ${totalParts} Parts`);
+      console.log(`🚀 Starting Universal Chain (${provider}): ${totalParts} Parts. Target per part: ${chunkCharsTarget}`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
-        const chunkCharsTarget = config.isCJK ? 1000 : 3000;
         let partPrompt = "";
 
         if (isFirst) {
@@ -373,7 +378,7 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
             STRICT RULES: 
             - DO NOT output "Part 1" header.
             - Start directly with the story.
-            - BE EXTREMELY VERBOSE.
+            - Keep pacing moderate. Do not rush, but do not be overly verbose.
           `;
         } else {
           partPrompt = `

@@ -58,17 +58,17 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
 
   const isCJK = ['jp', 'cn', 'kr'].includes(langId);
   
-  // Math: CJK ~333 chars/min, Latin ~1000 chars/min
+  // Math: CJK ~300 chars/min, Latin fixed at 1000 chars/min per user request
   let targetChars = 0;
   if (isCJK) {
-    targetChars = Math.round(minutes * (1000 / 3));
+    targetChars = Math.round(minutes * 300);
   } else {
-    targetChars = minutes * 1000;
+    targetChars = Math.round(minutes * 1000);
   }
 
-  // Strict range
-  const minChars = Math.round(targetChars * 0.95); 
-  const maxChars = Math.round(targetChars * 1.30); // Allow overflow for better detail
+  // Strict range (Target +/- 10%)
+  const minChars = Math.round(targetChars * 0.90); 
+  const maxChars = Math.round(targetChars * 1.10); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -129,8 +129,8 @@ export const generateScript = async (
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
   // === STRATEGY SELECTION ===
-  const CHUNK_DURATION = 3; 
-  const useChainedGeneration = config.minutes > 4;
+  const CHUNK_DURATION = 5; 
+  const useChainedGeneration = config.minutes > 6;
 
   // LANGUAGE SPECIFIC RULES
   let languageRules = "";
@@ -221,7 +221,7 @@ export const generateScript = async (
 
   try {
     if (!useChainedGeneration) {
-      // --- SINGLE PASS STRATEGY (Short Scripts < 4 mins) ---
+      // --- SINGLE PASS STRATEGY ---
       const prompt = `
         TASK: Write a ${config.minutes}-minute script (~${config.targetChars} chars).
         OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
@@ -229,7 +229,7 @@ export const generateScript = async (
         
         STRUCTURE:
         - Divide into logical "CHAPTERS" (but do not use headers).
-        - Every 30 seconds (~500 chars), insert a "Mini-Hook" or curiosity gap.
+        - Every 30 seconds (~400 chars), insert a "Mini-Hook" or curiosity gap.
         
         REQUIREMENT: YOU MUST HIT AT LEAST ${config.minChars} CHARACTERS.
         Expand on every point. Do not summarize.
@@ -244,8 +244,10 @@ export const generateScript = async (
       return response.text || "No content.";
 
     } else {
-      // --- SEAMLESS CHAINED GENERATION STRATEGY (Long Scripts > 4 mins) ---
+      // --- SEAMLESS CHAINED GENERATION STRATEGY ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
+      const chunkCharsTarget = Math.round(config.targetChars / totalParts);
+
       let fullScript = "";
       let previousContext = ""; 
 
@@ -255,8 +257,6 @@ export const generateScript = async (
         const isFirst = i === 1;
         const isLast = i === totalParts;
         
-        const chunkCharsTarget = config.isCJK ? 1000 : 3000;
-
         let partPrompt = "";
 
         if (isFirst) {
@@ -272,7 +272,7 @@ export const generateScript = async (
             3. Each paragraph must be 3-5 sentences. NO LISTS.
             4. END this part in the middle of a transition.
             
-            STRICT RULE: BE EXTREMELY VERBOSE. EXPLAIN "WHY" and "HOW".
+            STRICT RULE: Write moderately. Do not be overly verbose.
           `;
         } else {
           partPrompt = `
@@ -295,7 +295,7 @@ export const generateScript = async (
               : "5. End this part on a transition, ready for the next part."
             }
 
-            STRICT RULE: EXPAND DEEPLY. DO NOT SUMMARIZE. WRITE IN ${language.code.toUpperCase()}.
+            STRICT RULE: EXPAND DEEPLY BUT KEEP PACING. WRITE IN ${language.code.toUpperCase()}.
           `;
         }
 
