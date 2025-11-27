@@ -49,18 +49,18 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
   // CJK Languages (Chinese, Japanese, Korean)
   const isCJK = ['jp', 'cn', 'kr', 'tw', 'zh'].includes(langId);
   
-  // Updated Density Rule
+  // Updated Density Rule (2025 Update: Higher density for CJK)
   let targetChars = 0;
   if (isCJK) {
-    // RULE: 1000 characters = 3 minutes
-    targetChars = Math.round(minutes * 333);
+    // RULE: 500 characters per minute for CJK (Increased from 333 to force verbosity)
+    targetChars = Math.round(minutes * 500);
   } else {
-    // RULE: 1000 characters = 1 minute
+    // RULE: 1000 characters = 1 minute for Latin
     targetChars = Math.round(minutes * 1000); 
   }
 
   const minChars = Math.round(targetChars * 0.9); 
-  const maxChars = Math.round(targetChars * 1.1); 
+  const maxChars = Math.round(targetChars * 1.2); // Allow slightly more overflow
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -179,7 +179,6 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
         if (persona === 'buffett' || persona === 'munger') {
             const styleData = getPersonaStyle(persona);
             if (styleData) {
-                // Return immediately with the curated profile
                 return {
                     outline: ["The Opening Hook (Chào hỏi & Vào đề)", "The Pivot (Lật lại vấn đề)", "The Wisdom (Bài học cốt lõi)", "The Verdict (Lời khuyên chốt hạ)"],
                     characters: [styleData.name],
@@ -201,27 +200,25 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
             TASK: Perform a Deep Persona Analysis on: ${targetCharacter}.
             OUTPUT LANGUAGE: ${language.code.toUpperCase()}.
             
-            SIMULATE WIKIPEDIA/KNOWLEDGE RETRIEVAL:
-            1. Analyze ${targetCharacter}'s real-world speaking style (syntax, common phrases, tone).
-            2. Identify their Core Philosophy (Worldview).
-            3. List their Signature Keywords (Vocabulary).
-            4. Structure a monologue based on the input topic: "${input}".
-
+            SIMULATE KNOWLEDGE RETRIEVAL:
+            1. Analyze ${targetCharacter}'s real-world speaking style.
+            2. Identify Core Philosophy.
+            3. List Signature Keywords.
+            
             JSON OUTPUT ONLY:
             {
-               "outline": ["Hook (Identity Statement)", "Core Argument", "Counter-Intuitive Insight", "Call to Action"],
+               "outline": ["Hook", "Core Argument", "Insight", "Call to Action"],
                "characters": ["${targetCharacter}"],
-               "pacingNote": "Tone instructions (e.g., Sarcastic, Slow, High Energy)",
+               "pacingNote": "Tone description",
                "characterProfile": {
                    "name": "${targetCharacter}",
                    "archetype": "Brief archetype",
-                   "style": "Speaking style description",
-                   "corePhilosophy": "Key beliefs/philosophies",
-                   "keywords": ["Keyword1", "Keyword2", "Keyword3"]
+                   "style": "Speaking style",
+                   "corePhilosophy": "Key beliefs",
+                   "keywords": ["Keyword1", "Keyword2"]
                }
             }
         `;
-        // Use generic execution for simplicity
         try {
             const executeCall = async (sys: string, usr: string) => {
                 switch (provider) {
@@ -236,21 +233,21 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
             raw = raw.replace(/```json/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(raw);
             return {
-                outline: parsed.outline || ["Introduction", "Main Point", "Conclusion"],
+                outline: parsed.outline || ["Intro", "Body", "Conclusion"],
                 characters: parsed.characters || [targetCharacter],
-                pacingNote: parsed.pacingNote || "Direct Address",
+                pacingNote: parsed.pacingNote || "Direct",
                 characterProfile: parsed.characterProfile
             };
         } catch(e) {
             return {
-                outline: ["Mở đầu (Giới thiệu bản thân)", "Luận điểm chính", "Tư duy ngược", "Lời khuyên đúc kết"],
+                outline: ["Mở đầu", "Thân bài", "Kết luận"],
                 characters: [targetCharacter],
-                pacingNote: "Direct, First-Person",
+                pacingNote: "Standard",
                 characterProfile: {
                     name: targetCharacter,
                     archetype: "Expert",
                     style: "Authoritative",
-                    corePhilosophy: "Rational Thinking",
+                    corePhilosophy: "Rational",
                     keywords: []
                 }
             };
@@ -260,30 +257,19 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
     // ... (Existing logic for Drama/Senior Love) ...
     const systemPrompt = `
       ROLE: Senior Script Doctor & Architect.
-      TASK: Analyze the user's idea and outline a solid structure + character list.
-      OUTPUT LANGUAGE: ${language.code.toUpperCase()} (Vietnamese if 'vi').
+      TASK: Analyze the user's idea and outline a solid structure.
+      OUTPUT LANGUAGE: ${language.code.toUpperCase()}.
       
       REQUIREMENTS:
-      1. Define the 7-Stage Plot Framework specific to this story.
-      2. Create a list of FIXED characters (Name, Role, Key Trait).
-      3. OUTPUT FORMAT: JSON ONLY. No markdown.
+      1. Define the 7-Stage Plot Framework.
+      2. Create a list of FIXED characters.
+      3. OUTPUT FORMAT: JSON ONLY.
       
       JSON SCHEMA:
       {
-        "outline": [
-           "Stage 1 (Start): [Detail]",
-           "Stage 2 (Mystery): [Detail]",
-           "Stage 3 (Conflict): [Detail]",
-           "Stage 4 (Escalation): [Detail]",
-           "Stage 5 (Climax): [Detail]",
-           "Stage 6 (Resolution): [Detail]",
-           "Stage 7 (Ending): [Detail]"
-        ],
-        "characters": [
-           "Name - Role - Trait",
-           "Name - Role - Trait"
-        ],
-        "pacingNote": "Brief advice on tone (e.g., Slow burn, Fast paced)"
+        "outline": ["Stage 1...", "Stage 2...", ...],
+        "characters": ["Name - Role"],
+        "pacingNote": "Tone advice"
       }
     `;
     
@@ -301,21 +287,18 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
 
     try {
         let raw = await executeCall(systemPrompt, userPrompt);
-        // Clean markdown code blocks if present
         raw = raw.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(raw);
         return {
             outline: parsed.outline || [],
             characters: parsed.characters || [],
-            pacingNote: parsed.pacingNote || "Standard Pacing"
+            pacingNote: parsed.pacingNote || "Standard"
         };
     } catch (e) {
-        console.error("Analysis Parsing Error:", e);
-        // Fallback
         return {
             outline: ["Khởi đầu", "Uẩn khúc", "Xung đột", "Leo thang", "Cao trào", "Giải quyết", "Kết thúc"],
             characters: ["Nhân vật chính", "Nhân vật phụ"],
-            pacingNote: "Manual Review Needed"
+            pacingNote: "Manual Review"
         };
     }
 };
@@ -338,7 +321,6 @@ const buildSystemInstruction = (
       - VIETNAMESE SPECIFIC:
       - Read numbers as words.
       - Use "VTV" style: Formal, clear, precise.
-      - LOCALIZATION: Use Vietnamese names/locations unless topic implies otherwise.
     `;
   } else {
     languageRules = `
@@ -349,48 +331,37 @@ const buildSystemInstruction = (
   let approvedStructureInstruction = "";
   if (approvedAnalysis) {
       approvedStructureInstruction = `
-        *** APPROVED BLUEPRINT (DO NOT DEVIATE) ***
-        1. CHARACTERS (FIXED):
-           ${approvedAnalysis.characters.join('\n           ')}
-           -> YOU MUST USE THESE NAMES EXACTLY. DO NOT INVENT NEW MAIN CHARACTERS.
-           
-        2. PLOT OUTLINE (FIXED):
-           ${approvedAnalysis.outline.map((step, idx) => `Stage ${idx+1}: ${step}`).join('\n           ')}
-           -> FOLLOW THIS TRAJECTORY STRICTLY.
+        *** APPROVED BLUEPRINT ***
+        CHARACTERS (FIXED): ${approvedAnalysis.characters.join(', ')}
+        OUTLINE: ${approvedAnalysis.outline.join(' -> ')}
       `;
   }
 
   let personaInstruction = "";
   if (template.id === 'charlie-munger') {
-     // Use Deep Profile if available (Highest Priority)
      if (approvedAnalysis?.characterProfile) {
          const p = approvedAnalysis.characterProfile;
-         
-         // 1. Try to fetch specific style memory if it exists (Buffett/Munger)
          let styleMemory = "";
          if (p.name === 'Warren Buffett') {
              const s = getPersonaStyle('buffett');
-             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""\n(MIMIC THIS TONE EXACTLY)`;
+             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""`;
          } else if (p.name === 'Charlie Munger') {
              const s = getPersonaStyle('munger');
-             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""\n(MIMIC THIS TONE EXACTLY)`;
+             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""`;
          }
 
          personaInstruction = `
             *** DEEP PERSONA SIMULATION: ${p.name} ***
             You are NOT an AI. You are ${p.name}.
-            
             ARCHETYPE: ${p.archetype}
-            SPEAKING STYLE: ${p.style}
-            CORE PHILOSOPHY: ${p.corePhilosophy}
-            
-            MANDATORY VOCABULARY: ${p.keywords.join(', ')}.
+            STYLE: ${p.style}
+            PHILOSOPHY: ${p.corePhilosophy}
+            KEYWORDS: ${p.keywords.join(', ')}.
             ${styleMemory}
-            
             INSTRUCTION: Write in the first person ("Tôi"). Channel this persona completely.
          `;
      } else if (persona === 'custom' && customPersonaName) {
-       personaInstruction = `IMPORTANT: You are ${customPersonaName}. Adopt their known public persona, speaking style, vocabulary, and worldview perfectly. Speak in the first person ("Tôi").`;
+       personaInstruction = `IMPORTANT: You are ${customPersonaName}. Adopt their persona perfectly. Speak in the first person ("Tôi").`;
      }
   }
 
@@ -399,18 +370,15 @@ const buildSystemInstruction = (
     contextInstruction = `USER CONTEXT: """${personalContext}"""\nApply this context implicitly.`;
   }
 
-  let learningInstruction = "";
-  if (learnedExamples && learnedExamples.length > 0) {
-    learningInstruction = `
-      *** STYLE MIMICRY ***
-      MIMIC this style:
-      ${learnedExamples[0].substring(0, 500)}...
-    `;
-  }
-
   return `
     *** CRITICAL LANGUAGE FIREWALL ***
     YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
+    
+    *** VERBOSE MODE ACTIVATED (CRITICAL) ***
+    - DO NOT SUMMARIZE. DO NOT CONDENSE.
+    - EXPAND ON EVERY POINT. Use anecdotes, examples, and detailed explanations.
+    - If the user asks for a long script, you MUST fill the time.
+    - AVOID bullet points unless absolutely necessary. Use flowing narrative paragraphs.
     
     ROLE: Expert Scriptwriter.
     TONE: Natural Storytelling, Emotional but Grounded.
@@ -419,16 +387,13 @@ const buildSystemInstruction = (
     - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO'}
 
     ${approvedStructureInstruction}
-
     ${personaInstruction}
     ${contextInstruction}
-    ${learningInstruction}
 
     === STRICT TTS FORMATTING ===
     1. Short paragraphs (3-5 sentences).
-    2. NO LISTS. Narrative only.
+    2. Narrative style only.
     3. NO [Music], [Sound].
-    4. NO "Before we dive in...".
 
     ${languageRules}
 
@@ -466,13 +431,12 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
 
   try {
     if (!useChainedGeneration) {
-      // Single pass
       const userPrompt = `
         TASK: Write a complete ${config.minutes}-minute script.
         TARGET: ~${config.targetChars} characters.
         TOPIC: "${input}"
-        ${approvedAnalysis ? "NOTE: Stick to the Approved Blueprint defined in System Prompt." : ""}
         STRUCTURE: Continuous narrative. ONE Hook at start.
+        STRICT: DO NOT SUMMARIZE. BE VERBOSE.
       `;
       const rawText = await executeCall(systemInstruction, userPrompt);
       return cleanArtifacts(rawText);
@@ -491,13 +455,10 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
         const isLast = i === totalParts;
         
         let pacingInstruction = "";
-        
         if (approvedAnalysis && approvedAnalysis.outline.length > 0) {
              const totalStages = approvedAnalysis.outline.length;
-             // Determine which stages correspond to this part
              const startStage = Math.floor(((i - 1) / totalParts) * totalStages);
              const endStage = Math.floor((i / totalParts) * totalStages);
-             
              const stagesCovered = approvedAnalysis.outline.slice(startStage, endStage + 1);
              pacingInstruction = `
                 CURRENT PLOT FOCUS (Part ${i}/${totalParts}):
@@ -510,18 +471,14 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
              else pacingInstruction = "PACING: CONCLUSION & RESOLUTION.";
         }
 
-        // Context Memory: Use full script so far, sliced to fit window
         const memoryContext = fullScript.slice(-3000);
-        // Transition Context: Immediate previous text for seamless stitching
         const transitionContext = fullScript.slice(-300);
 
         const continuityInstruction = isFirst ? "" : `
             *** CONTINUITY ENFORCEMENT ***
             PREVIOUS TEXT ENDED WITH: "...${transitionContext}"
-            
             INSTRUCTION: Start your response IMMEDIATELY after the text above. 
             - DO NOT repeat the last sentence.
-            - DO NOT start with "In this part" or "Continuing".
             - Connect the syntax naturally.
             - MAINTAIN LANGUAGE: ${language.code.toUpperCase()}.
         `;
@@ -532,6 +489,9 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
             TOPIC: "${input}"
             
             ${pacingInstruction}
+            
+            STRICT INSTRUCTION: BE VERBOSE. DO NOT SUMMARIZE.
+            TELL STORIES. GIVE EXAMPLES. EXPAND ON EVERY DETAIL.
             
             ${isFirst ? "Start with a powerful Hook." : ""}
             ${isLast ? "Bring the story to a satisfying conclusion." : "End this part on a transition."}

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
@@ -59,17 +60,15 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
   
   let targetChars = 0;
   if (isCJK) {
-    // RULE: 1000 characters = 3 minutes
-    // => ~333 characters per minute
-    targetChars = Math.round(minutes * 333);
+    // RULE: 500 characters per minute for CJK (Increased from 333 to force verbosity)
+    targetChars = Math.round(minutes * 500);
   } else {
     // RULE: 1000 characters = 1 minute (English/Vietnamese/etc)
-    // => 1000 characters per minute
     targetChars = Math.round(minutes * 1000); 
   }
 
   const minChars = Math.round(targetChars * 0.9); 
-  const maxChars = Math.round(targetChars * 1.1); 
+  const maxChars = Math.round(targetChars * 1.2); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -120,177 +119,6 @@ export const generateScript = async (
   personalContext?: string 
 ): Promise<string> => {
   
-  let ai;
-  try {
-    ai = getAiClient();
-  } catch (e) {
-    return `⚠️ CHƯA CẬP NHẬT API KEY\n\nXem hướng dẫn trong phần Cài đặt.`;
-  }
-
-  const config = calculateTargetLength(language.id, duration.id, customMinutes);
-  
-  // INCREASED CHUNK DURATION FOR SAFETY & CONTINUITY
-  const CHUNK_DURATION = 4; 
-  const useChainedGeneration = config.minutes > 5;
-
-  let languageRules = "";
-  if (language.id === 'vi') {
-    languageRules = `
-      - VIETNAMESE SPECIFIC:
-      - Read numbers as words (e.g., "2024" -> "hai nghìn không trăm hai mươi tư").
-      - Use "VTV" style: Formal, clear, precise.
-      - Translate any English input terms to Vietnamese unless they are proper nouns.
-    `;
-  } else {
-    languageRules = `
-      - Ensure natural phrasing for native speakers of ${language.code}.
-      - If input is in a different language, TRANSLATE IT COMPLETELY.
-    `;
-  }
-
-  let personaInstruction = "";
-  if (template.id === 'charlie-munger') {
-     if (persona === 'buffett') {
-       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of WARREN BUFFETT (Optimistic, Folksy, Grandfatherly). DO NOT be Munger.";
-     } else if (persona === 'munger') {
-       personaInstruction = "IMPORTANT OVERRIDE: IGNORE input triggers. You MUST adopt the persona of CHARLIE MUNGER (Blunt, Realistic, Cynical). DO NOT be Buffett.";
-     } else {
-       personaInstruction = "AUTO-DETECT MODE: Analyze the input to decide whether to be Buffett or Munger.";
-     }
-  }
-
-  let contextInstruction = "";
-  if (personalContext && personalContext.trim().length > 0) {
-    contextInstruction = `
-      *** PERSONAL CONTEXT / BRAND VOICE ***
-      USER CONTEXT: """${personalContext}"""
-      INSTRUCTION: Apply this context implicitly.
-    `;
-  }
-
-  const baseInstruction = `
-    *** CRITICAL LANGUAGE FIREWALL ***
-    YOU MUST WRITE THE SCRIPT ENTIRELY IN: [ ${language.code.toUpperCase()} ].
-    
-    ROLE: Expert YouTube Scriptwriter & Voice Director.
-    TONE: Natural Storytelling, Emotional but Grounded, Rhythmic.
-    
-    *** NARRATIVE PERSPECTIVE ***
-    - MODE: ${perspective.id !== 'auto' ? perspective.label : 'AUTO-DETECT based on content type'}
-    - INSTRUCTION: Maintain this perspective consistently.
-
-    ${personaInstruction}
-    ${contextInstruction}
-
-    === STRICT TTS FORMATTING ENGINE ===
-    1. PARAGRAPH STRUCTURE: Short paragraphs (3-5 sentences). ONE main idea per paragraph.
-    2. NO LISTS / NO HEADERS: Output PURE SPOKEN TEXT.
-    3. CLEAN AUDIO ONLY: NO [Intro], [Music], [Sound Effect].
-    4. NATURAL FLOW: AVOID filler words. Ensure logic flows forward.
-
-    ${languageRules}
-
-    TEMPLATE: ${template.title}
-    ${template.systemPromptAddon}
-  `;
-
-  try {
-    if (!useChainedGeneration) {
-      // --- SINGLE PASS ---
-      const userPrompt = `
-        TASK: Write a complete ${config.minutes}-minute script.
-        TARGET LENGTH: ~${config.targetChars} chars.
-        OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-        TOPIC: "${input}"
-        STRUCTURE: Continuous narrative. Start with a strong Hook.
-        STRICT: Do NOT include headers or scene descriptions. Just the spoken words.
-      `;
-
-      const response = await generateWithRetry(ai, {
-        model: 'gemini-2.5-flash',
-        contents: userPrompt,
-        config: { systemInstruction: baseInstruction, temperature: 0.65 }
-      });
-      
-      return response.text || "No content.";
-
-    } else {
-      // --- OPTIMIZED CHAINED GENERATION ---
-      const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
-      const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      
-      let fullScript = "";
-
-      console.log(`🚀 Starting Seamless Chain: ${totalParts} Parts. Target: ~${chunkCharsTarget} chars/part.`);
-
-      for (let i = 1; i <= totalParts; i++) {
-        const isFirst = i === 1;
-        const isLast = i === totalParts;
-        
-        let pacingInstruction = "";
-        const progress = i / totalParts;
-        
-        if (progress <= 0.2) pacingInstruction = "PACING: INTRODUCTION & HOOK.";
-        else if (progress <= 0.8) pacingInstruction = "PACING: DEVELOPMENT & CONFLICT.";
-        else pacingInstruction = "PACING: CONCLUSION & RESOLUTION.";
-
-        // Context Management
-        const memoryContext = fullScript.slice(-3000);
-        const transitionContext = fullScript.slice(-300);
-
-        const continuityInstruction = isFirst ? "" : `
-            *** CONTINUITY ENFORCEMENT ***
-            PREVIOUS TEXT ENDED WITH: "...${transitionContext}"
-            
-            INSTRUCTION: Start your response IMMEDIATELY after the text above. 
-            - DO NOT repeat the last sentence.
-            - Connect the syntax naturally.
-            - MAINTAIN LANGUAGE: ${language.code.toUpperCase()}.
-        `;
-
-        const partPrompt = `
-            *** PART ${i} of ${totalParts} ***
-            TARGET LENGTH: ~${chunkCharsTarget} characters.
-            TOPIC: "${input}"
-            
-            ${pacingInstruction}
-            
-            ${isFirst ? "Start with a powerful Hook." : ""}
-            ${isLast ? "Bring the story to a satisfying conclusion." : "End this part on a transition."}
-            
-            CONTEXT MEMORY: "...${memoryContext}"
-            ${continuityInstruction}
-        `;
-
-        console.log(`📝 Generating Part ${i}...`);
-        
-        const response = await generateWithRetry(ai, {
-          model: 'gemini-2.5-flash',
-          contents: partPrompt,
-          config: { systemInstruction: baseInstruction, temperature: 0.65 }
-        });
-
-        let partText = response.text || "";
-        
-        // Cleanup
-        partText = partText.replace(/^\*\*Part \d+\*\*[:\s]*/i, '').replace(/^Part \d+[:\s]*/i, '');
-        partText = partText.replace(/^[\*\-]\s/gm, ''); 
-
-        fullScript += (isFirst ? "" : " ") + partText;
-
-        if (!isLast) await delay(4000); 
-      }
-      
-      return fullScript;
-    }
-
-  } catch (error: any) {
-    console.error("API Error:", error);
-    const msg = error.message || '';
-    if (msg.includes('API key') || msg.includes('403') || msg.includes('MISSING_API_KEY')) {
-       return `⚠️ LỖI API KEY: KHÓA KHÔNG HỢP LỆ HOẶC ĐÃ HẾT HẠN.`;
-    }
-    if (msg.includes('quota')) return `⚠️ HỆ THỐNG ĐANG BẬN (QUOTA EXCEEDED): Vui lòng đợi 1-2 phút rồi thử lại.`;
-    return `⚠️ LỖI: ${msg}`;
-  }
+  // Legacy Wrapper for direct Gemini Usage (Universal Service is preferred)
+  return `⚠️ Vui lòng sử dụng hàm universalGenerateScript() trong App.tsx để có tính năng đầy đủ.`;
 };
