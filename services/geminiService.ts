@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption } from '../types';
 
@@ -40,7 +39,7 @@ async function generateWithRetry(
   }
 }
 
-// SYNCED WITH UNIVERSAL AI SERVICE (1000 chars/min)
+// SYNCED WITH UNIVERSAL AI SERVICE
 export const calculateTargetLength = (langId: string, durationId: string, customMinutes?: number) => {
   let minutes = 3; 
   if (durationId === 'custom' && customMinutes && customMinutes > 0) {
@@ -55,17 +54,22 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
     }
   }
 
-  const isCJK = ['jp', 'cn', 'kr'].includes(langId);
+  // CJK Languages (Chinese, Japanese, Korean)
+  const isCJK = ['jp', 'cn', 'kr', 'tw', 'zh'].includes(langId);
   
   let targetChars = 0;
   if (isCJK) {
-    targetChars = Math.round(minutes * 300);
+    // RULE: 1000 characters = 3 minutes
+    // => ~333 characters per minute
+    targetChars = Math.round(minutes * 333);
   } else {
+    // RULE: 1000 characters = 1 minute (English/Vietnamese/etc)
+    // => 1000 characters per minute
     targetChars = Math.round(minutes * 1000); 
   }
 
-  const minChars = Math.round(targetChars * 0.95); 
-  const maxChars = Math.round(targetChars * 1.05); 
+  const minChars = Math.round(targetChars * 0.9); 
+  const maxChars = Math.round(targetChars * 1.1); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -125,9 +129,9 @@ export const generateScript = async (
 
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
-  // INCREASED CHUNK DURATION FOR CONSISTENCY
-  const CHUNK_DURATION = 5; 
-  const useChainedGeneration = config.minutes > 6;
+  // INCREASED CHUNK DURATION FOR SAFETY & CONTINUITY
+  const CHUNK_DURATION = 4; 
+  const useChainedGeneration = config.minutes > 5;
 
   let languageRules = "";
   if (language.id === 'vi') {
@@ -193,73 +197,69 @@ export const generateScript = async (
   try {
     if (!useChainedGeneration) {
       // --- SINGLE PASS ---
-      const maxWords = Math.round(config.targetChars / 4.5);
-      
-      const prompt = `
-        TASK: Write a ${config.minutes}-minute script.
-        TARGET LENGTH: ~${config.targetChars} chars (Approx ${maxWords} words).
+      const userPrompt = `
+        TASK: Write a complete ${config.minutes}-minute script.
+        TARGET LENGTH: ~${config.targetChars} chars.
         OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-        INPUT TOPIC: "${input}"
-        
-        STRUCTURE:
-        - Divide into logical sections (no headers).
-        - Start with ONE strong Hook.
-        
-        STRICT LENGTH CONSTRAINT:
-        - Do NOT exceed ${maxWords + 100} words.
+        TOPIC: "${input}"
+        STRUCTURE: Continuous narrative. Start with a strong Hook.
+        STRICT: Do NOT include headers or scene descriptions. Just the spoken words.
       `;
 
       const response = await generateWithRetry(ai, {
         model: 'gemini-2.5-flash',
-        contents: prompt,
+        contents: userPrompt,
         config: { systemInstruction: baseInstruction, temperature: 0.65 }
       });
       
       return response.text || "No content.";
 
     } else {
-      // --- CHAINED GENERATION ---
+      // --- OPTIMIZED CHAINED GENERATION ---
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
       const chunkCharsTarget = Math.round(config.targetChars / totalParts);
-      const chunkWordTarget = Math.round(chunkCharsTarget / 4.5);
-
+      
       let fullScript = "";
-      let previousContext = ""; 
 
-      console.log(`🚀 Starting Seamless Chain: ${totalParts} Parts for ${config.minutes} mins. Target: ~${chunkWordTarget} words/part.`);
+      console.log(`🚀 Starting Seamless Chain: ${totalParts} Parts. Target: ~${chunkCharsTarget} chars/part.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
         
-        // --- PACING CONTROL ---
         let pacingInstruction = "";
-        if (isFirst) pacingInstruction = "STATUS: BEGINNING. Introduce characters/conflict. Establish consistent setting.";
-        else if (isLast) pacingInstruction = "STATUS: ENDING. Resolve conflict. No cliffhangers. No new plots.";
-        else pacingInstruction = "STATUS: MIDDLE. Develop story. Do not start over. Do not change names.";
+        const progress = i / totalParts;
         
-        // Increased context window to 4000 chars to avoid "Amnesia"
-        const contextWindow = previousContext.slice(-4000);
+        if (progress <= 0.2) pacingInstruction = "PACING: INTRODUCTION & HOOK.";
+        else if (progress <= 0.8) pacingInstruction = "PACING: DEVELOPMENT & CONFLICT.";
+        else pacingInstruction = "PACING: CONCLUSION & RESOLUTION.";
 
-        const consistencyCheck = i > 1 ? `
-            *** CRITICAL RULES ***
-            1. DO NOT CHANGE NAMES.
-            2. DO NOT RECAP OR RE-HOOK ("Before we dive in...").
-            3. CONTINUE IMMEDIATELY from the previous sentence.
-        ` : "";
+        // Context Management
+        const memoryContext = fullScript.slice(-3000);
+        const transitionContext = fullScript.slice(-300);
+
+        const continuityInstruction = isFirst ? "" : `
+            *** CONTINUITY ENFORCEMENT ***
+            PREVIOUS TEXT ENDED WITH: "...${transitionContext}"
+            
+            INSTRUCTION: Start your response IMMEDIATELY after the text above. 
+            - DO NOT repeat the last sentence.
+            - Connect the syntax naturally.
+            - MAINTAIN LANGUAGE: ${language.code.toUpperCase()}.
+        `;
 
         const partPrompt = `
             *** PART ${i} of ${totalParts} ***
-            OUTPUT LANGUAGE: ${language.code.toUpperCase()} ONLY.
-            GOAL: Write the NEXT ${CHUNK_DURATION} MINUTES (~${chunkWordTarget} words).
+            TARGET LENGTH: ~${chunkCharsTarget} characters.
             TOPIC: "${input}"
             
-            PACING: ${pacingInstruction}
-            ${i > 1 ? `PREVIOUS CONTEXT: "...${contextWindow}"` : ""}
-            ${consistencyCheck}
+            ${pacingInstruction}
             
-            STRICT LENGTH CONSTRAINT:
-            - Target: ~${chunkWordTarget} words.
+            ${isFirst ? "Start with a powerful Hook." : ""}
+            ${isLast ? "Bring the story to a satisfying conclusion." : "End this part on a transition."}
+            
+            CONTEXT MEMORY: "...${memoryContext}"
+            ${continuityInstruction}
         `;
 
         console.log(`📝 Generating Part ${i}...`);
@@ -277,7 +277,6 @@ export const generateScript = async (
         partText = partText.replace(/^[\*\-]\s/gm, ''); 
 
         fullScript += (isFirst ? "" : " ") + partText;
-        previousContext = partText;
 
         if (!isLast) await delay(4000); 
       }

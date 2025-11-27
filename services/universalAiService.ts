@@ -1,7 +1,7 @@
 
-
 import { GoogleGenAI } from "@google/genai";
 import { ScriptTemplate, LanguageOption, DurationOption, InputMode, PerspectiveOption, AIProvider, ScriptAnalysis } from '../types';
+import { getPersonaStyle } from './personaStyles';
 
 // --- HELPER TYPES & FUNCTIONS ---
 
@@ -22,7 +22,8 @@ interface GenerateOptions {
   mode: InputMode;
   perspective: PerspectiveOption;
   customMinutes?: number;
-  persona?: 'auto' | 'buffett' | 'munger';
+  persona?: 'auto' | 'buffett' | 'munger' | 'custom';
+  customPersonaName?: string;
   personalContext?: string;
   learnedExamples?: string[]; // Dữ liệu tự học từ lịch sử
   approvedAnalysis?: ScriptAnalysis; // Dữ liệu phân tích đã được user duyệt
@@ -45,19 +46,21 @@ export const calculateTargetLength = (langId: string, durationId: string, custom
     }
   }
 
-  const isCJK = ['jp', 'cn', 'kr'].includes(langId);
+  // CJK Languages (Chinese, Japanese, Korean)
+  const isCJK = ['jp', 'cn', 'kr', 'tw', 'zh'].includes(langId);
   
-  // ADJUSTMENT: 950 chars/min to aim for ~57,000 chars for 60 mins.
+  // Updated Density Rule
   let targetChars = 0;
   if (isCJK) {
-    targetChars = Math.round(minutes * 300);
+    // RULE: 1000 characters = 3 minutes
+    targetChars = Math.round(minutes * 333);
   } else {
-    targetChars = Math.round(minutes * 950); 
+    // RULE: 1000 characters = 1 minute
+    targetChars = Math.round(minutes * 1000); 
   }
 
-  // Strict range
-  const minChars = Math.round(targetChars * 0.95); 
-  const maxChars = Math.round(targetChars * 1.05); 
+  const minChars = Math.round(targetChars * 0.9); 
+  const maxChars = Math.round(targetChars * 1.1); 
 
   return { minutes, targetChars, minChars, maxChars, isCJK };
 };
@@ -164,8 +167,97 @@ async function callGoogle(apiKey: string, model: string, system: string, user: s
 
 // --- NEW FEATURE: ANALYZE REQUEST ---
 export const analyzeScriptRequest = async (options: GenerateOptions): Promise<ScriptAnalysis> => {
-    const { provider, model, input, template, language, apiKeys } = options;
+    const { provider, model, input, template, language, apiKeys, persona, customPersonaName } = options;
     
+    // SPECIAL HANDLER FOR MONOLOGUE (CHARLIE MUNGER/CUSTOM)
+    if (template.id === 'charlie-munger') {
+        const targetCharacter = persona === 'custom' && customPersonaName ? customPersonaName : 
+                                persona === 'buffett' ? 'Warren Buffett' : 
+                                persona === 'munger' ? 'Charlie Munger' : 'The Expert';
+
+        // 1. Check if we have PRE-DEFINED STYLE MEMORY for this persona
+        if (persona === 'buffett' || persona === 'munger') {
+            const styleData = getPersonaStyle(persona);
+            if (styleData) {
+                // Return immediately with the curated profile
+                return {
+                    outline: ["The Opening Hook (Chào hỏi & Vào đề)", "The Pivot (Lật lại vấn đề)", "The Wisdom (Bài học cốt lõi)", "The Verdict (Lời khuyên chốt hạ)"],
+                    characters: [styleData.name],
+                    pacingNote: styleData.styleDescription,
+                    characterProfile: {
+                        name: styleData.name,
+                        archetype: styleData.archetype,
+                        style: styleData.styleDescription,
+                        corePhilosophy: styleData.corePhilosophy,
+                        keywords: styleData.keywords
+                    }
+                };
+            }
+        }
+
+        // 2. If Custom, Simulate Wiki Lookup
+        const monologueSystem = `
+            ROLE: Master Persona Architect & Researcher.
+            TASK: Perform a Deep Persona Analysis on: ${targetCharacter}.
+            OUTPUT LANGUAGE: ${language.code.toUpperCase()}.
+            
+            SIMULATE WIKIPEDIA/KNOWLEDGE RETRIEVAL:
+            1. Analyze ${targetCharacter}'s real-world speaking style (syntax, common phrases, tone).
+            2. Identify their Core Philosophy (Worldview).
+            3. List their Signature Keywords (Vocabulary).
+            4. Structure a monologue based on the input topic: "${input}".
+
+            JSON OUTPUT ONLY:
+            {
+               "outline": ["Hook (Identity Statement)", "Core Argument", "Counter-Intuitive Insight", "Call to Action"],
+               "characters": ["${targetCharacter}"],
+               "pacingNote": "Tone instructions (e.g., Sarcastic, Slow, High Energy)",
+               "characterProfile": {
+                   "name": "${targetCharacter}",
+                   "archetype": "Brief archetype",
+                   "style": "Speaking style description",
+                   "corePhilosophy": "Key beliefs/philosophies",
+                   "keywords": ["Keyword1", "Keyword2", "Keyword3"]
+               }
+            }
+        `;
+        // Use generic execution for simplicity
+        try {
+            const executeCall = async (sys: string, usr: string) => {
+                switch (provider) {
+                  case 'openai': return callOpenAI(apiKeys.openaiApiKey || '', model, sys, usr);
+                  case 'anthropic': return callAnthropic(apiKeys.anthropicApiKey || '', model, sys, usr);
+                  case 'xai': return callXAI(apiKeys.xaiApiKey || '', model, sys, usr);
+                  case 'google': return callGoogle(apiKeys.googleApiKey || '', model, sys, usr);
+                  default: throw new Error(`Provider ${provider} not supported`);
+                }
+            };
+            let raw = await executeCall(monologueSystem, `Topic: ${input}`);
+            raw = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(raw);
+            return {
+                outline: parsed.outline || ["Introduction", "Main Point", "Conclusion"],
+                characters: parsed.characters || [targetCharacter],
+                pacingNote: parsed.pacingNote || "Direct Address",
+                characterProfile: parsed.characterProfile
+            };
+        } catch(e) {
+            return {
+                outline: ["Mở đầu (Giới thiệu bản thân)", "Luận điểm chính", "Tư duy ngược", "Lời khuyên đúc kết"],
+                characters: [targetCharacter],
+                pacingNote: "Direct, First-Person",
+                characterProfile: {
+                    name: targetCharacter,
+                    archetype: "Expert",
+                    style: "Authoritative",
+                    corePhilosophy: "Rational Thinking",
+                    keywords: []
+                }
+            };
+        }
+    }
+
+    // ... (Existing logic for Drama/Senior Love) ...
     const systemPrompt = `
       ROLE: Senior Script Doctor & Architect.
       TASK: Analyze the user's idea and outline a solid structure + character list.
@@ -219,10 +311,10 @@ export const analyzeScriptRequest = async (options: GenerateOptions): Promise<Sc
         };
     } catch (e) {
         console.error("Analysis Parsing Error:", e);
-        // Fallback if AI fails to return JSON
+        // Fallback
         return {
             outline: ["Khởi đầu", "Uẩn khúc", "Xung đột", "Leo thang", "Cao trào", "Giải quyết", "Kết thúc"],
-            characters: ["Nhân vật chính (Chưa đặt tên)", "Nhân vật phụ (Chưa đặt tên)"],
+            characters: ["Nhân vật chính", "Nhân vật phụ"],
             pacingNote: "Manual Review Needed"
         };
     }
@@ -234,6 +326,7 @@ const buildSystemInstruction = (
   language: LanguageOption, 
   perspective: PerspectiveOption,
   persona: string = 'auto',
+  customPersonaName?: string,
   personalContext?: string,
   learnedExamples?: string[],
   approvedAnalysis?: ScriptAnalysis
@@ -269,10 +362,35 @@ const buildSystemInstruction = (
 
   let personaInstruction = "";
   if (template.id === 'charlie-munger') {
-     if (persona === 'buffett') {
-       personaInstruction = "IMPORTANT: You are WARREN BUFFETT.";
-     } else if (persona === 'munger') {
-       personaInstruction = "IMPORTANT: You are CHARLIE MUNGER.";
+     // Use Deep Profile if available (Highest Priority)
+     if (approvedAnalysis?.characterProfile) {
+         const p = approvedAnalysis.characterProfile;
+         
+         // 1. Try to fetch specific style memory if it exists (Buffett/Munger)
+         let styleMemory = "";
+         if (p.name === 'Warren Buffett') {
+             const s = getPersonaStyle('buffett');
+             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""\n(MIMIC THIS TONE EXACTLY)`;
+         } else if (p.name === 'Charlie Munger') {
+             const s = getPersonaStyle('munger');
+             if (s) styleMemory = `\nSTYLE MEMORY / SAMPLE TEXT:\n"""${s.sampleMonologue}"""\n(MIMIC THIS TONE EXACTLY)`;
+         }
+
+         personaInstruction = `
+            *** DEEP PERSONA SIMULATION: ${p.name} ***
+            You are NOT an AI. You are ${p.name}.
+            
+            ARCHETYPE: ${p.archetype}
+            SPEAKING STYLE: ${p.style}
+            CORE PHILOSOPHY: ${p.corePhilosophy}
+            
+            MANDATORY VOCABULARY: ${p.keywords.join(', ')}.
+            ${styleMemory}
+            
+            INSTRUCTION: Write in the first person ("Tôi"). Channel this persona completely.
+         `;
+     } else if (persona === 'custom' && customPersonaName) {
+       personaInstruction = `IMPORTANT: You are ${customPersonaName}. Adopt their known public persona, speaking style, vocabulary, and worldview perfectly. Speak in the first person ("Tôi").`;
      }
   }
 
@@ -324,17 +442,17 @@ const buildSystemInstruction = (
 export const universalGenerateScript = async (options: GenerateOptions): Promise<string> => {
   const { 
     provider, model, input, template, language, duration, 
-    customMinutes, persona, personalContext, learnedExamples, apiKeys, approvedAnalysis 
+    customMinutes, persona, customPersonaName, personalContext, learnedExamples, apiKeys, approvedAnalysis 
   } = options;
 
   const config = calculateTargetLength(language.id, duration.id, customMinutes);
   
   const systemInstruction = buildSystemInstruction(
-      template, language, options.perspective, persona, personalContext, learnedExamples, approvedAnalysis 
+      template, language, options.perspective, persona, customPersonaName, personalContext, learnedExamples, approvedAnalysis 
   );
   
-  const CHUNK_DURATION = 5;
-  const useChainedGeneration = config.minutes > 6; 
+  const CHUNK_DURATION = 4;
+  const useChainedGeneration = config.minutes > 5; 
 
   const executeCall = async (sys: string, usr: string) => {
     switch (provider) {
@@ -348,10 +466,10 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
 
   try {
     if (!useChainedGeneration) {
-      const maxWords = Math.round(config.targetChars / 4.5);
+      // Single pass
       const userPrompt = `
-        TASK: Write a ${config.minutes}-minute script.
-        TARGET: ~${maxWords} words.
+        TASK: Write a complete ${config.minutes}-minute script.
+        TARGET: ~${config.targetChars} characters.
         TOPIC: "${input}"
         ${approvedAnalysis ? "NOTE: Stick to the Approved Blueprint defined in System Prompt." : ""}
         STRUCTURE: Continuous narrative. ONE Hook at start.
@@ -360,69 +478,72 @@ export const universalGenerateScript = async (options: GenerateOptions): Promise
       return cleanArtifacts(rawText);
 
     } else {
+      // Optimized Chained Generation
       const totalParts = Math.ceil(config.minutes / CHUNK_DURATION);
-      const chunkWordTarget = Math.round((config.targetChars / totalParts) / 4.5); 
+      const chunkCharsTarget = Math.round(config.targetChars / totalParts);
       
       let fullScript = "";
-      let previousContext = "";
-
-      console.log(`🚀 Starting Chain: ${totalParts} Parts with Approved Blueprint.`);
+      
+      console.log(`🚀 Starting Optimized Chain: ${totalParts} Parts. Target ~${chunkCharsTarget} chars/part.`);
 
       for (let i = 1; i <= totalParts; i++) {
         const isFirst = i === 1;
         const isLast = i === totalParts;
-        const progress = i / totalParts;
         
-        // Map progress to the 7 stages from the Approved Analysis if available
         let pacingInstruction = "";
-        let stageName = "";
         
-        if (approvedAnalysis && approvedAnalysis.outline.length === 7) {
-             // Logic mapping 7 outline steps to parts
-             // Simple distribution logic
-             const stageIndex = Math.floor((i - 1) / totalParts * 7); 
-             // Ensure we don't go out of bounds
-             const validIndex = Math.min(stageIndex, 6);
-             stageName = `Stage ${validIndex + 1}`;
-             const stageDetail = approvedAnalysis.outline[validIndex];
+        if (approvedAnalysis && approvedAnalysis.outline.length > 0) {
+             const totalStages = approvedAnalysis.outline.length;
+             // Determine which stages correspond to this part
+             const startStage = Math.floor(((i - 1) / totalParts) * totalStages);
+             const endStage = Math.floor((i / totalParts) * totalStages);
              
+             const stagesCovered = approvedAnalysis.outline.slice(startStage, endStage + 1);
              pacingInstruction = `
-                CURRENT FOCUS: ${stageName}.
-                DETAILS: ${stageDetail}.
-                Keep characters consistent: ${approvedAnalysis.characters.join(', ')}.
+                CURRENT PLOT FOCUS (Part ${i}/${totalParts}):
+                ${stagesCovered.map(s => `- ${s}`).join('\n')}
              `;
         } else {
-             // Fallback logic if no analysis (old logic)
-             if (progress <= 0.15) pacingInstruction = "STAGE: KHỞI ĐẦU.";
-             else if (progress <= 0.30) pacingInstruction = "STAGE: UẨN KHÚC.";
-             else if (progress <= 0.50) pacingInstruction = "STAGE: XUNG ĐỘT.";
-             else if (progress <= 0.70) pacingInstruction = "STAGE: LEO THANG.";
-             else if (progress <= 0.85) pacingInstruction = "STAGE: CAO TRÀO.";
-             else pacingInstruction = "STAGE: KẾT THÚC.";
+             const progress = i / totalParts;
+             if (progress <= 0.2) pacingInstruction = "PACING: INTRODUCTION & HOOK.";
+             else if (progress <= 0.8) pacingInstruction = "PACING: DEVELOPMENT & CONFLICT.";
+             else pacingInstruction = "PACING: CONCLUSION & RESOLUTION.";
         }
 
-        const contextWindow = previousContext.slice(-4000); 
-        const consistencyCheck = i > 1 ? `
-            *** CONTINUITY ***
-            1. NAMES: Must match Approved List.
-            2. NO RECAPS.
-            3. Continue exactly where left off.
-        ` : "";
+        // Context Memory: Use full script so far, sliced to fit window
+        const memoryContext = fullScript.slice(-3000);
+        // Transition Context: Immediate previous text for seamless stitching
+        const transitionContext = fullScript.slice(-300);
+
+        const continuityInstruction = isFirst ? "" : `
+            *** CONTINUITY ENFORCEMENT ***
+            PREVIOUS TEXT ENDED WITH: "...${transitionContext}"
+            
+            INSTRUCTION: Start your response IMMEDIATELY after the text above. 
+            - DO NOT repeat the last sentence.
+            - DO NOT start with "In this part" or "Continuing".
+            - Connect the syntax naturally.
+            - MAINTAIN LANGUAGE: ${language.code.toUpperCase()}.
+        `;
 
         const promptTemplate = `
-            *** PART ${i} of ${totalParts} ***
-            GOAL: Write NEXT ~${chunkWordTarget} words.
+            *** GENERATING PART ${i} of ${totalParts} ***
+            TARGET LENGTH: ~${chunkCharsTarget} characters.
+            TOPIC: "${input}"
+            
             ${pacingInstruction}
             
-            ${i > 1 ? `PREVIOUS CONTEXT: "...${contextWindow}"` : ""}
-            ${consistencyCheck}
+            ${isFirst ? "Start with a powerful Hook." : ""}
+            ${isLast ? "Bring the story to a satisfying conclusion." : "End this part on a transition."}
+            
+            CONTEXT MEMORY: "...${memoryContext}"
+            ${continuityInstruction}
         `;
 
         let partText = await executeCall(systemInstruction, promptTemplate);
         partText = cleanArtifacts(partText);
 
         fullScript += (isFirst ? "" : " ") + partText;
-        previousContext = partText;
 
         if (!isLast) await delay(1000); 
       }

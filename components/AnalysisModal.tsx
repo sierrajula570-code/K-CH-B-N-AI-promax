@@ -1,7 +1,8 @@
 
+
 import React, { useState } from 'react';
 import { ScriptAnalysis } from '../types';
-import { X, Check, Edit2, Users, List, Play } from 'lucide-react';
+import { X, Check, Edit2, Users, List, Play, Fingerprint, Sparkles } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -12,11 +13,15 @@ interface Props {
 
 const AnalysisModal: React.FC<Props> = ({ isOpen, onClose, analysis, onConfirm }) => {
   const [editableAnalysis, setEditableAnalysis] = useState<ScriptAnalysis>(analysis);
-  const [activeTab, setActiveTab] = useState<'outline' | 'characters'>('outline');
+  const [activeTab, setActiveTab] = useState<'outline' | 'characters' | 'profile'>('outline');
 
   // Sync state when analysis prop changes
   React.useEffect(() => {
     setEditableAnalysis(analysis);
+    // Auto switch to profile tab if it's a Monologue with profile data
+    if (analysis.characterProfile && !analysis.characters.length) {
+        setActiveTab('profile');
+    }
   }, [analysis]);
 
   if (!isOpen) return null;
@@ -32,6 +37,8 @@ const AnalysisModal: React.FC<Props> = ({ isOpen, onClose, analysis, onConfirm }
     newChars[index] = val;
     setEditableAnalysis({ ...editableAnalysis, characters: newChars });
   };
+
+  const hasProfile = !!editableAnalysis.characterProfile;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -56,19 +63,27 @@ const AnalysisModal: React.FC<Props> = ({ isOpen, onClose, analysis, onConfirm }
                onClick={() => setActiveTab('outline')}
                className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'outline' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:bg-slate-50'}`}
             >
-                <List className="w-4 h-4" /> Cấu trúc 7 Bước
+                <List className="w-4 h-4" /> Cấu trúc
             </button>
             <button 
                onClick={() => setActiveTab('characters')}
                className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'characters' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:bg-slate-50'}`}
             >
-                <Users className="w-4 h-4" /> Nhân vật Cố định
+                <Users className="w-4 h-4" /> Nhân vật
             </button>
+            {hasProfile && (
+                <button 
+                onClick={() => setActiveTab('profile')}
+                className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'profile' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                    <Fingerprint className="w-4 h-4" /> Hồ sơ (Wiki)
+                </button>
+            )}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
-            {activeTab === 'outline' ? (
+            {activeTab === 'outline' && (
                 <div className="space-y-4">
                     {editableAnalysis.outline.map((step, idx) => (
                         <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -85,7 +100,9 @@ const AnalysisModal: React.FC<Props> = ({ isOpen, onClose, analysis, onConfirm }
                         </div>
                     ))}
                 </div>
-            ) : (
+            )}
+            
+            {activeTab === 'characters' && (
                 <div className="space-y-3">
                     {editableAnalysis.characters.map((char, idx) => (
                         <div key={idx} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm group focus-within:ring-2 focus-within:ring-indigo-500 transition-all">
@@ -103,6 +120,51 @@ const AnalysisModal: React.FC<Props> = ({ isOpen, onClose, analysis, onConfirm }
                     ))}
                     <div className="text-center p-4 text-slate-400 text-xs italic">
                         * Bạn có thể sửa tên và vai trò trực tiếp tại đây. AI sẽ tuân thủ danh sách này tuyệt đối.
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'profile' && editableAnalysis.characterProfile && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-yellow-500" /> Hồ sơ AI Trích xuất
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs text-slate-400 uppercase font-bold">Tên / Định danh</label>
+                                <div className="text-sm font-bold text-slate-800">{editableAnalysis.characterProfile.name}</div>
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-400 uppercase font-bold">Hình mẫu (Archetype)</label>
+                                <div className="text-sm font-medium text-slate-700">{editableAnalysis.characterProfile.archetype}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <label className="text-xs text-slate-400 uppercase font-bold block mb-2">Phong cách nói chuyện (Style)</label>
+                        <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            {editableAnalysis.characterProfile.style}
+                        </p>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                         <label className="text-xs text-slate-400 uppercase font-bold block mb-2">Triết lý cốt lõi (Worldview)</label>
+                         <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            {editableAnalysis.characterProfile.corePhilosophy}
+                        </p>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                         <label className="text-xs text-slate-400 uppercase font-bold block mb-2">Từ khóa đặc trưng (Signature Keywords)</label>
+                         <div className="flex flex-wrap gap-2">
+                             {editableAnalysis.characterProfile.keywords.map((kw, i) => (
+                                 <span key={i} className="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-100">
+                                     {kw}
+                                 </span>
+                             ))}
+                         </div>
                     </div>
                 </div>
             )}

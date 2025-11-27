@@ -38,6 +38,7 @@ import { fetchAppConfig } from './services/configService';
 import { auth, isConfigured } from './services/firebase'; 
 import { onAuthStateChanged, Unsubscribe } from 'firebase/auth';
 import { Zap, Loader2, ScanSearch, ArrowDown, AlertTriangle, CloudOff } from 'lucide-react';
+import { isSupabaseConfigured } from './services/supabase';
 
 function App() {
   // Auth State
@@ -70,7 +71,8 @@ function App() {
   const [customMinutes, setCustomMinutes] = useState<number>(5);
   const [selectedPerspective, setSelectedPerspective] = useState<PerspectiveOption>(PERSPECTIVES[0]);
   
-  const [selectedPersona, setSelectedPersona] = useState<'auto' | 'buffett' | 'munger'>('auto');
+  const [selectedPersona, setSelectedPersona] = useState<'auto' | 'buffett' | 'munger' | 'custom'>('auto');
+  const [customPersonaName, setCustomPersonaName] = useState('');
 
   // AI Selection State
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>('google');
@@ -95,10 +97,6 @@ function App() {
       if (config.languages.length > 0) setLanguages(config.languages);
       if (config.durations.length > 0) setDurations(config.durations);
       if (config.perspectives.length > 0) setPerspectives(config.perspectives);
-      
-      if (config.templates.length > 0 && selectedTemplate.id === 'general') {
-          // Keep selection logic roughly safe
-      }
     };
     loadConfig();
   }, []);
@@ -116,24 +114,25 @@ function App() {
             if (profile) {
                setCurrentAccount(profile);
                
-               // Listen for realtime changes
                unsubscribeUser = listenToAccountChanges(user.uid, (updatedProfile) => {
                   if (!updatedProfile) {
-                     // Account deleted
+                     // Account deleted or Quota error
                   } else {
                      setCurrentAccount(updatedProfile);
                      claimSession(user.uid);
                   }
                });
                
-               // Load history
                const historyData = await getHistory(user.uid);
                setHistory(historyData);
             } else {
-               // Profile is null. Either Quota or DB Error.
-               console.warn("Authentication successful, but Profile Load failed (Offline/Quota Mode).");
-               setAuthError("Hệ thống Database đang bảo trì (Quota). Bạn vẫn có thể dùng AI bình thường, nhưng Lịch sử sẽ không được lưu.");
-               setCurrentAccount(null); // Treat as guest visually
+               // Quota Mode or Profile Missing
+               console.warn("Offline/Quota Mode Active.");
+               setAuthError("Hệ thống Database đang bảo trì (Offline Mode). Lịch sử sẽ được lưu vào máy tính của bạn.");
+               setCurrentAccount(null); 
+               // Still try to load local history
+               const localHist = await getHistory(user.uid);
+               setHistory(localHist);
             }
         } catch (e) {
             console.error("Auth Init Error:", e);
@@ -153,10 +152,20 @@ function App() {
     };
   }, []);
 
+  // Helper to fetch keys (LOCAL ONLY - Privacy First)
+  const getMergedApiKeys = async () => {
+      return {
+          googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || undefined,
+          openaiApiKey: localStorage.getItem('openai_api_key') || undefined,
+          anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || undefined,
+          xaiApiKey: localStorage.getItem('kb_xai_api_key') || undefined
+      };
+  };
+
   const handleAnalyze = async () => {
-    // Allow guest mode if quota exceeded, as long as API key exists
-    const hasApiKey = localStorage.getItem('gemini_api_key') || process.env.API_KEY;
-    if (!currentAccount && !hasApiKey && !authError) {
+    // Check minimal requirements
+    const hasLocalKey = localStorage.getItem('gemini_api_key') || process.env.API_KEY;
+    if (!currentAccount && !hasLocalKey && !authError) {
         setIsLoginOpen(true);
         return;
     }
@@ -166,16 +175,16 @@ function App() {
         return;
     }
 
+    if (selectedTemplate.id === 'charlie-munger' && selectedPersona === 'custom' && !customPersonaName.trim()) {
+        alert("Vui lòng nhập tên nhân vật tùy chỉnh!");
+        return;
+    }
+
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
     try {
-        const apiKeys = {
-            googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || undefined,
-            openaiApiKey: localStorage.getItem('openai_api_key') || undefined,
-            anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || undefined,
-            xaiApiKey: localStorage.getItem('kb_xai_api_key') || undefined
-        };
+        const apiKeys = await getMergedApiKeys();
 
         const result = await analyzeScriptRequest({
             provider: selectedProvider,
@@ -186,7 +195,9 @@ function App() {
             duration: selectedDuration,
             mode: inputMode,
             perspective: selectedPerspective,
-            apiKeys
+            apiKeys,
+            persona: selectedPersona,
+            customPersonaName: customPersonaName
         });
 
         setAnalysisResult(result);
@@ -209,12 +220,7 @@ function App() {
        learnedExamples = await getRecentHistoryByTemplate(currentAccount.id, selectedTemplate.id);
     }
 
-    const apiKeys = {
-        googleApiKey: localStorage.getItem('gemini_api_key') || process.env.API_KEY || undefined,
-        openaiApiKey: localStorage.getItem('openai_api_key') || undefined,
-        anthropicApiKey: localStorage.getItem('kb_anthropic_api_key') || undefined,
-        xaiApiKey: localStorage.getItem('kb_xai_api_key') || undefined
-    };
+    const apiKeys = await getMergedApiKeys();
 
     const result = await universalGenerateScript({
         provider: selectedProvider,
@@ -227,6 +233,7 @@ function App() {
         perspective: selectedPerspective,
         customMinutes,
         persona: selectedPersona,
+        customPersonaName: customPersonaName,
         personalContext: currentAccount?.personalContext,
         learnedExamples,
         approvedAnalysis, 
@@ -235,41 +242,24 @@ function App() {
 
     setGeneratedContent(result);
 
-    // Save History if possible
-    if (currentAccount && !result.startsWith('⚠️')) {
-        const newItem: HistoryItem = {
-            id: Date.now().toString(),
-            userId: currentAccount.id,
-            timestamp: Date.now(),
-            templateId: selectedTemplate.id,
-            templateTitle: selectedTemplate.title,
-            inputPreview: inputText.substring(0, 50) + '...',
-            content: result
-        };
-        
-        const saved = await saveToFirestore(currentAccount.id, newItem);
-        if (saved) {
-            setHistory(prev => [newItem, ...prev]);
-        }
-
-        await saveToGlobalKnowledge(inputText, result, selectedTemplate.id, selectedLanguage.id);
-    }
+    // --- AUTO SAVE DISABLED TO PREVENT DB EXHAUSTION ---
+    // The previous auto-save block has been removed as requested.
     
     setIsLoading(false);
   };
 
   const handleDeleteHistory = async (id: string) => {
-    if (!currentAccount) return;
+    const userId = currentAccount?.id || 'guest_offline';
     if (confirm("Bạn có chắc chắn muốn xóa?")) {
-       await deleteFromFirestore(currentAccount.id, id);
+       await deleteFromFirestore(userId, id);
        setHistory(prev => prev.filter(item => item.id !== id));
     }
   };
 
   const handleClearHistory = async () => {
-    if (!currentAccount) return;
+    const userId = currentAccount?.id || 'guest_offline';
     if (confirm("Xóa toàn bộ lịch sử? Hành động này không thể hoàn tác.")) {
-        await clearFirestoreHistory(currentAccount.id);
+        await clearFirestoreHistory(userId);
         setHistory([]);
     }
   };
@@ -292,33 +282,13 @@ function App() {
              <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
                 <CloudOff className="w-5 h-5 text-amber-600" />
                 <div>
-                   <p className="font-bold text-sm">Chế độ Offline / Giới hạn</p>
+                   <p className="font-bold text-sm">Chế độ Offline / Tiết kiệm Database</p>
                    <p className="text-xs">{authError}</p>
                 </div>
              </div>
         )}
 
-        {isConfigured && !isCheckingAuth && !currentAccount && !authError && (
-           <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-4">
-              <div className="flex items-center gap-3">
-                 <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
-                    <Zap className="w-5 h-5 text-yellow-300 fill-yellow-300" />
-                 </div>
-                 <div>
-                    <h3 className="font-bold text-lg">Chào mừng bạn đến với Kichban AI Pro Max!</h3>
-                    <p className="text-white/90 text-sm">Đăng nhập để lưu lịch sử, mở khóa tính năng tự học và quản lý Prompt cá nhân.</p>
-                 </div>
-              </div>
-              <button 
-                onClick={() => setIsLoginOpen(true)}
-                className="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition shadow-md active:scale-95 whitespace-nowrap"
-              >
-                Đăng nhập ngay
-              </button>
-           </div>
-        )}
-
-        {/* 1. INPUT SECTION (TOP & BIG) */}
+        {/* 1. INPUT SECTION */}
         <section className="animate-in fade-in slide-in-from-top-4 duration-500">
            <InputSection 
               value={inputText}
@@ -364,6 +334,8 @@ function App() {
               }}
               selectedPersona={selectedPersona}
               onSelectPersona={setSelectedPersona}
+              customPersonaName={customPersonaName}
+              setCustomPersonaName={setCustomPersonaName}
 
               selectedProvider={selectedProvider}
               onSelectProvider={setSelectedProvider}

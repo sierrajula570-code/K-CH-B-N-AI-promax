@@ -1,7 +1,8 @@
 
+
 import React, { useState } from 'react';
 import { LanguageOption, DurationOption, PerspectiveOption, AIProvider } from '../types';
-import { Languages, Clock, Settings2, ChevronDown, User, Crown, Bot, Sparkles, Brain, Zap } from 'lucide-react';
+import { Languages, Clock, Settings2, ChevronDown, User, Crown, Bot, Sparkles, Brain, Zap, PenTool } from 'lucide-react';
 import { AI_MODELS } from '../constants';
 
 interface Props {
@@ -19,8 +20,10 @@ interface Props {
   selectedPerspective: string;
   onSelectPerspective: (perspective: PerspectiveOption) => void;
   
-  selectedPersona: 'auto' | 'buffett' | 'munger';
-  onSelectPersona: (p: 'auto' | 'buffett' | 'munger') => void;
+  selectedPersona: 'auto' | 'buffett' | 'munger' | 'custom';
+  onSelectPersona: (p: 'auto' | 'buffett' | 'munger' | 'custom') => void;
+  customPersonaName: string;
+  setCustomPersonaName: (s: string) => void;
 
   selectedProvider: AIProvider;
   onSelectProvider: (p: AIProvider) => void;
@@ -43,6 +46,8 @@ const ConfigSection: React.FC<Props> = ({
   onSelectPerspective,
   selectedPersona,
   onSelectPersona,
+  customPersonaName,
+  setCustomPersonaName,
   selectedProvider,
   onSelectProvider,
   selectedModelId,
@@ -145,16 +150,32 @@ const ConfigSection: React.FC<Props> = ({
 
           {/* Persona Selector */}
           {showPersonaSelector && (
-            <div className="animate-in fade-in slide-in-from-left-4 duration-300">
+            <div className="animate-in fade-in slide-in-from-left-4 duration-300 lg:col-span-1">
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                 <div className="p-1 bg-yellow-100 rounded text-yellow-600"><Crown className="w-3.5 h-3.5" /></div>
-                Chọn Nhân Vật
+                Chọn Nhân Vật Nhập Vai
               </h4>
               <div className="flex flex-col gap-2">
                 <button onClick={() => onSelectPersona('auto')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'auto' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-slate-200 text-slate-600'}`}>✨ Tự động (Theo nội dung)</button>
-                <button onClick={() => onSelectPersona('buffett')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'buffett' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>🍔 Warren Buffett (Lạc quan)</button>
-                <button onClick={() => onSelectPersona('munger')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'munger' ? 'border-slate-600 bg-slate-100 text-slate-800' : 'border-slate-200 text-slate-600'}`}>👓 Charlie Munger (Thực tế)</button>
+                <button onClick={() => onSelectPersona('buffett')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'buffett' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}>🍔 Warren Buffett</button>
+                <button onClick={() => onSelectPersona('munger')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'munger' ? 'border-slate-600 bg-slate-100 text-slate-800' : 'border-slate-200 text-slate-600'}`}>👓 Charlie Munger</button>
+                <button onClick={() => onSelectPersona('custom')} className={`px-4 py-3 text-xs font-bold rounded-xl border text-left transition-all ${selectedPersona === 'custom' ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-600'}`}>
+                    <span className="flex items-center gap-2"><PenTool className="w-3.5 h-3.5"/> Tùy chỉnh (Khác)</span>
+                </button>
               </div>
+
+              {selectedPersona === 'custom' && (
+                  <div className="mt-2 animate-in fade-in slide-in-from-top-1">
+                      <input 
+                        type="text"
+                        value={customPersonaName}
+                        onChange={(e) => setCustomPersonaName(e.target.value)}
+                        placeholder="Nhập tên nhân vật (vd: Steve Jobs)"
+                        className="w-full px-3 py-2 text-sm border border-violet-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 bg-violet-50/50"
+                        autoFocus
+                      />
+                  </div>
+              )}
             </div>
           )}
 

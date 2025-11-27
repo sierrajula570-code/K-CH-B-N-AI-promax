@@ -1,4 +1,5 @@
 
+
 export interface ScriptTemplate {
   id: string;
   icon: string;
@@ -62,6 +63,14 @@ export interface ScriptAnalysis {
   outline: string[]; // 7 steps
   characters: string[]; // List of characters with roles
   pacingNote: string;
+  // Deep Persona Profile for Monologue Mode
+  characterProfile?: {
+    name: string;
+    archetype: string;
+    style: string;         // Speaking style (e.g. blunt, poetic, technical)
+    corePhilosophy: string; // Worldview / Beliefs
+    keywords: string[];    // Signature vocabulary
+  };
 }
 
 // --- AI INTEGRAION TYPES ---
